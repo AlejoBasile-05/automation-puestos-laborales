@@ -66,6 +66,9 @@ class Job(Base):
     """Vacante normalizada."""
     __tablename__ = "jobs"
 
+    # Permite atributos Python no mapeados (por ejemplo ``is_new``).
+    __allow_unmapped__ = True
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     company_id: Mapped[int] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     source: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -82,6 +85,9 @@ class Job(Base):
     is_open: Mapped[bool] = mapped_column(Integer, nullable=False, default=1)  # SQLite usa 0/1 para Boolean
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), nullable=False, default=JobStatus.NEW)
     raw_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # Marca calculada en la capa de consultas: no se persiste.
+    is_new: bool = False
 
     # Relaciones
     company: Mapped["Company"] = relationship("Company", back_populates="jobs")
