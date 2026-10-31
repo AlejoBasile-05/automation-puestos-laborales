@@ -22,10 +22,10 @@ search:
   max_age_days: 7
 
 llm:
-  provider: "anthropic"        # anthropic | ollama
-  model_scoring: "claude-3-haiku-20240307"   # modelo económico para scoring
-  model_writing: "claude-3-5-sonnet-20241022"  # modelo calidad para redacción
-  max_jobs_per_run: 50
+  provider: "nvidia"        # anthropic | ollama | nvidia
+  model_scoring: "meta/llama-3.2-90b-vision-instruct"   # modelo gratuito de Nvidia NIM
+  model_writing: "deepseek-ai/deepseek-v4.1-flash"   # mismo modelo para redacción (gratuito)
+  max_jobs_per_run: 10
 
 http:
   requests_per_second: 1
