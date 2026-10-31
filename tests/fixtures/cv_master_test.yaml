@@ -1,0 +1,65 @@
+basics:
+  name: "Test User"
+  email: "test@example.com"
+  phone: "+00 000 000 0000"
+  location: "Test City"
+  links: []
+
+summary_facts:
+  - "Test experience"
+
+target_titles:
+  - "Test Title"
+
+eligibility:
+  years_experience:
+    total: 5
+    by_area:
+      "backend": 3
+      "frontend": 2
+  work_authorization: ["Argentina"]
+  relocation: false
+  remote_ok: true
+
+experience:
+  - id: "exp_test_1"
+    company: "Test Company"
+    title: "Developer"
+    start: "2020"
+    end: "present"
+    location: "Test City"
+    bullets:
+      - id: "exp_test_1_b1"
+        text: "Desarrollé aplicaciones con Power BI y planeación y análisis financiero (FP&A). Manejo de proyectos desde hace varios años."
+        tags: ["powerbi", "fp&a", "analisis-financiero", "proyectos"]
+
+education:
+  - id: "edu_test_1"
+    institution: "Test University"
+    degree: "Ingeniería"
+    year: "2020"
+
+skills:
+  - name: "Power BI"
+    aliases: ["PowerBI", "Microsoft Power BI"]
+    tags: ["bi", "analisis"]
+    level: "avanzado"
+    years: 3
+  - name: "JavaScript"
+    aliases: ["JS", "Node.js"]
+    tags: ["lenguajes", "frontend", "backend"]
+    level: "avanzado"
+    years: 5
+  - name: "Inglés"
+    aliases: ["English", "Ingles"]
+    tags: ["idiomas"]
+    level: "B2"
+    years: 2
+
+certifications: []
+
+languages:
+  - name: "Español"
+    level: "nativo"
+  - name: "Inglés"
+    level: "B2"
