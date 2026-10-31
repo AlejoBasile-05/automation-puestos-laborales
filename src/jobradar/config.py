@@ -15,7 +15,7 @@ class SearchConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     """Configuración del proveedor LLM."""
-    provider: str = "anthropic"  # anthropic | ollama
+    provider: str = "anthropic"  # anthropic | ollama | nvidia
     model_scoring: str = "claude-3-haiku-20240307"
     model_writing: str = "claude-3-5-sonnet-20241022"
     max_jobs_per_run: int = 50
@@ -35,6 +35,12 @@ class ATSConfig(BaseModel):
     font: str = "Arial"
     font_size_pt: int = 11
     date_format: str = "MMM YYYY"
+
+
+class DiscoveryConfig(BaseModel):
+    """Configuración del descubrimiento de empresas (Fase 7)."""
+    max_queries_per_run: int = 5
+    cache_ttl_hours: int = 24
 
 
 class CompanyConfig(BaseModel):
@@ -60,11 +66,13 @@ class Settings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     http: HTTPConfig = Field(default_factory=HTTPConfig)
     ats: ATSConfig = Field(default_factory=ATSConfig)
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     companies: list[CompanyConfig] = Field(default_factory=list)
 
     # Secrets (solo en .env, nunca en config.yaml)
     anthropic_api_key: str | None = Field(default=None, repr=False)
     ollama_base_url: str | None = Field(default=None, repr=False)
+    nvidia_api_key: str | None = Field(default=None, repr=False)
 
 
 def load_config(config_path: str = "config.yaml") -> Settings:

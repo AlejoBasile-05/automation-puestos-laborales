@@ -39,6 +39,10 @@ ats:
   font_size_pt: 11
   date_format: "MMM YYYY"
 
+discovery:
+  max_queries_per_run: 5
+  cache_ttl_hours: 24
+
 companies:
   - name: "Empresa Ejemplo Greenhouse"
     source: "greenhouse"
