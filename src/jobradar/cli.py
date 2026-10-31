@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 
 from jobradar import __version__
+from jobradar.sources import get_source, list_sources
 
 app = typer.Typer(
     name="jobradar",
@@ -42,8 +43,33 @@ def probe(
     slug: str = typer.Argument(..., help="Slug/tenant de la empresa"),
 ) -> None:
     """Valida una empresa y cuenta sus vacantes."""
-    console.print("[yellow]probe no implementado aún[/yellow]")
-    console.print(f"Fuente: {source}, Slug: {slug}")
+    # Validar fuente
+    available = list_sources()
+    if source.lower() not in available:
+        console.print(f"[red]Fuente desconocida: {source}[/red]")
+        console.print(f"Fuentes disponibles: {', '.join(available)}")
+        raise typer.Exit(1)
+
+    try:
+        source_instance = get_source(source)
+        # company_config para probe
+        company_config = {"slug": slug, "name": slug}
+
+        console.print(f"[blue]Probando {source} con slug '{slug}'...[/blue]")
+        success, count, error = source_instance.probe(company_config)
+
+        if success:
+            console.print(f"[green]✓[/green] {source}/{slug}: {count} vacantes encontradas")
+        else:
+            console.print(f"[red]✗[/red] {source}/{slug}: {error}")
+            raise typer.Exit(1) from None
+
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1) from None
+    except Exception as e:
+        console.print(f"[red]Error inesperado:[/red] {e}")
+        raise typer.Exit(1) from None
 
 
 @app.command()
