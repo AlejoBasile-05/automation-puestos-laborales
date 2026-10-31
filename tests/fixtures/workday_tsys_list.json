@@ -1,0 +1,18 @@
+{
+  "jobPosts": [
+    {
+      "title": "Senior Software Engineer",
+      "externalPath": "/tsys/job/Senior-Software-Engineer_JR-12345",
+      "locationsText": "Atlanta, GA, United States",
+      "postedOn": "Posted 2 Days Ago",
+      "id": "JR-12345"
+    },
+    {
+      "title": "Data Analyst",
+      "externalPath": "/tsys/job/Data-Analyst_JR-12346",
+      "locationsText": "Remote",
+      "postedOn": "Posted Today",
+      "id": "JR-12346"
+    }
+  ]
+}
