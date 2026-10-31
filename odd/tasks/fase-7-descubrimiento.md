@@ -171,3 +171,40 @@ trackear. No se inició el ciclo de revisión: el candidato válido es un commit
 unidad de trabajo o un slice de PR, y las fases 1-6 siguen sin commit, así que
 el límite del slice lo decide el usuario. Estado: **Needs your decision**.
 
+L8 — El usuario aprobó armar los commits por fase. Se crearon 9 slices sobre
+`main` (árbol limpio, sin push):
+
+| Commit | Archivos | Líneas (add+del) |
+|---|---|---|
+| `ac02693` fase-0: evidencia de cierre | 1 | 19 |
+| `a448843` fase-1: ingesta + prefiltro + tests | 7 | 689 |
+| `4d1f62b` fase-2: capa de consultas del dashboard | 3 | 867 |
+| `b05462e` fase-3: Nvidia NIM + factory + scoring | 5 | 396 |
+| `57c6d77` fase-4a: keywords ATS + knockouts | 5 | 567 |
+| `fb987d4` fase-4b: tailoring + validador | 4 | 712 |
+| `95d408a` fase-4c: render + ats_check | 5 | 1052 |
+| `37d4b4c` fase-6: Workday | 6 | 527 |
+| `89044a7` fase-7: descubrimiento + integración CLI/dashboard | 9 | 1704 |
+
+`config.yaml` se partió por hunk: el bloque `llm` (nvidia) fue a fase-3 y el
+bloque `discovery` a fase-7. Cada slice se validó extrayendo su árbol con
+`git archive` y comprobando que los módulos que toca importan sin error: 9/9 OK.
+Suite final: 152 tests, ruff y mypy limpios.
+
+L9 — Semántica de `gentle-ai review assess --base-ref X --committed-only`
+(verificada): el candidato es **X..HEAD**, no un commit aislado. Un slice
+intermedio solo se puede revisar retroactivamente con HEAD situado en ese
+commit. Todos los slices salieron `risk: high` con
+`reasons=[{code: process_boundary, path: src/jobradar/cli.py, detail: signal:
+shell_process}]` porque `cli.py` ejecuta `subprocess.run` (comando `dashboard`)
+y entra en el rango. El tier no distingue tamaño ni contenido del slice.
+
+L10 — Deuda detectada y NO corregida (fuera de alcance de esta fase):
+`src/jobradar/ats_keywords.py:extract_requirements` es un **placeholder** que
+devuelve `keywords: []` y `knockouts: []`. Por eso `jobradar requirements` y
+`jobradar tailor` no producen keywords reales: falta cablear el LLM de
+extracción con `prompts/ats_extract_v1.md`. Además, `src/jobradar/prompts/`
+está trackeado y muerto: el código lee `prompts/` desde la raíz del repo, así
+que los comandos dependen del cwd. Ambas cosas quedan pendientes de decisión.
+
+
