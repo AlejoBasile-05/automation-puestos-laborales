@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        /* Plantilla ATS: una columna, fuente estándar, sin tablas, sin imágenes */
+        body {
+            font-family: '{{ font }}', Arial, sans-serif;
+            font-size: {{ font_size_pt }}pt;
+            color: #000;
+            line-height: 1.4;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20mm;
+            font-variant-ligatures: none;
+        }
+        h1, h2, h3 {
+            font-weight: bold;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        .contact { margin-bottom: 1em; }
+        .section { margin-bottom: 1.5em; }
+        .job { margin-bottom: 1em; }
+        .job-title { font-weight: bold; }
+        .job-company { font-style: italic; }
+        .job-dates { color: #333; }
+        ul { padding-left: 1.5em; margin: 0.5em 0; }
+        li { margin-bottom: 0.3em; }
+        .bullet { margin-left: 1em; }
+    </style>
+</head>
+<body>
+    <!-- Contacto en el cuerpo, nunca en header/footer -->
+    <div class="contact">
+        <h1>{{ basics.name }}</h1>
+        <p>{{ basics.email }} | {{ basics.phone }} | {{ basics.location }}</p>
+        {% for link in basics.links %}
+        <p><a href="{{ link.url }}">{{ link.label }}</a></p>
+        {% endfor %}
+    </div>
+
+    <!-- Resumen -->
+    <div class="section">
+        <h2>{{ "Resumen profesional" if language == "es" else "Professional Summary" }}</h2>
+        <p>{{ summary }}</p>
+    </div>
+
+    <!-- Habilidades -->
+    <div class="section">
+        <h2>{{ "Habilidades" if language == "es" else "Skills" }}</h2>
+        <ul>
+        {% for skill in skills %}
+            <li>{{ skill }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+
+    <!-- Experiencia (cronología inversa) -->
+    <div class="section">
+        <h2>{{ "Experiencia profesional" if language == "es" else "Professional Experience" }}</h2>
+        {% for exp in experience %}
+        <div class="job">
+            <p class="job-title">{{ exp.title }}</p>
+            <p class="job-company">{{ exp.company }} | {{ exp.location }}</p>
+            <p class="job-dates">{{ exp.start }} – {{ exp.end }}</p>
+            <ul>
+            {% for bullet in exp.bullets %}
+                <li class="bullet">{{ bullet }}</li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Educación -->
+    <div class="section">
+        <h2>{{ "Educación" if language == "es" else "Education" }}</h2>
+        {% for edu in education %}
+        <p>{{ edu.degree }}, {{ edu.institution }} ({{ edu.year }})</p>
+        {% endfor %}
+    </div>
+
+    <!-- Certificaciones -->
+    {% if certifications %}
+    <div class="section">
+        <h2>{{ "Certificaciones" if language == "es" else "Certifications" }}</h2>
+        <ul>
+        {% for cert in certifications %}
+            <li>{{ cert }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <!-- Idiomas -->
+    <div class="section">
+        <h2>{{ "Idiomas" if language == "es" else "Languages" }}</h2>
+        <ul>
+        {% for lang in languages %}
+            <li>{{ lang.name }}: {{ lang.level }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

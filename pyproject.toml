@@ -32,6 +32,9 @@ dependencies = [
     "rich>=13.7.0",
 ]
 
+[project.scripts]
+jobradar = "jobradar.cli:app"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2.0",

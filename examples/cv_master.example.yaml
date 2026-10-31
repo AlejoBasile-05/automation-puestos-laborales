@@ -1,0 +1,143 @@
+# CV Maestro de EJEMPLO (datos 100% FICTICIOS)
+# Copia este archivo a data/cv_master.yaml y reemplaza con tus datos reales
+# Cada elemento tiene un `id` estable para trazabilidad
+
+basics:
+  name: "Juan Pérez García"
+  email: "juan.perez.ejemplo@email.com"
+  phone: "+52 81 1234 5678"
+  location: "Monterrey, Nuevo León, México"
+  links:
+    - label: "LinkedIn"
+      url: "https://linkedin.com/in/juanperezejemplo"
+    - label: "GitHub"
+      url: "https://github.com/juanperezejemplo"
+
+summary_facts:
+  - "5 años de experiencia en análisis financiero y FP&A"
+  - "Especialista en automatización de reportes y modelos financieros"
+  - "Experiencia en presupuestos, forecasting y análisis de varianzas"
+
+target_titles:
+  - "Analista Financiero"
+  - "Financial Analyst"
+  - "FP&A Analyst"
+  - "Analista de Planeación Financiera"
+
+eligibility:
+  years_experience:
+    total: 5
+    by_area:
+      "FP&A": 3
+      "reporting": 4
+      "automatización": 2
+  work_authorization: ["México"]
+  relocation: false
+  remote_ok: true
+
+experience:
+  - id: "exp_empresa_a"
+    company: "TechCorp México"
+    title: "Analista Financiero Senior"
+    start: "2022-01"
+    end: "present"
+    location: "Monterrey, NL"
+    bullets:
+      - id: "exp_empresa_a_b1"
+        text: "Reduje el tiempo de cierre mensual de 8 a 5 días automatizando conciliaciones en Excel y Power Query."
+        tags: ["finanzas", "automatización", "excel", "power-query"]
+      - id: "exp_empresa_a_b2"
+        text: "Diseñé modelo de forecasting de 12 meses que mejoró precisión en 15% vs método anterior."
+        tags: ["forecasting", "modelado", "fp&a"]
+      - id: "exp_empresa_a_b3"
+        text: "Lideré migración de reportes manuales a Power BI, reduciendo tiempo de preparación 60%."
+        tags: ["power-bi", "visualización", "automatización"]
+
+  - id: "exp_empresa_b"
+    company: "Industrial Solutions SA"
+    title: "Analista FP&A"
+    start: "2020-03"
+    end: "2021-12"
+    location: "Monterrey, NL"
+    bullets:
+      - id: "exp_empresa_b_b1"
+        text: "Preparé presupuesto anual de $50M USD coordinando 12 áreas funcionales."
+        tags: ["presupuesto", "fp&a", "coordinación"]
+      - id: "exp_empresa_b_b2"
+        text: "Analicé varianzas mensuales (P&L) identificando desviaciones >5% para acción correctiva."
+        tags: ["análisis-varianzas", "p&l", "control"]
+      - id: "exp_empresa_b_b3"
+        text: "Automatizé consolidación de 5 filiales con macros VBA, ahorrando 20h/mes."
+        tags: ["vba", "consolidación", "automatización"]
+
+  - id: "exp_empresa_c"
+    company: "Servicios Financieros del Norte"
+    title: "Analista Contable"
+    start: "2019-01"
+    end: "2020-02"
+    location: "Monterrey, NL"
+    bullets:
+      - id: "exp_empresa_c_b1"
+        text: "Concilié cuentas bancarias y contables mensualmente (50+ cuentas)."
+        tags: ["contabilidad", "conciliación", "bancos"]
+      - id: "exp_empresa_c_b2"
+        text: "Apoyé auditoría externa preparando papeles de trabajo y conciliaciones."
+        tags: ["auditoría", "papeles-trabajo"]
+
+education:
+  - id: "edu_1"
+    institution: "Universidad Autónoma de Nuevo León"
+    degree: "Licenciatura en Contaduría Pública y Finanzas"
+    year: "2018"
+
+  - id: "edu_2"
+    institution: "Tecnológico de Monterrey"
+    degree: "Diplomado en Business Intelligence y Data Analytics"
+    year: "2021"
+
+skills:
+  - name: "Excel avanzado"
+    aliases: ["Microsoft Excel", "MS Excel", "Excel"]
+    tags: ["excel", "hojas-cálculo"]
+    level: "avanzado"
+    years: 7
+  - name: "Power BI"
+    aliases: ["PowerBI", "Microsoft Power BI"]
+    tags: ["bi", "visualización", "dax"]
+    level: "avanzado"
+    years: 4
+  - name: "Power Query"
+    aliases: ["M", "Power Query M"]
+    tags: ["etl", "transformación-datos"]
+    level: "avanzado"
+    years: 3
+  - name: "Modelado financiero"
+    aliases: ["Financial Modeling", "Modelos financieros"]
+    tags: ["fp&a", "forecasting", "valuación"]
+    level: "avanzado"
+    years: 5
+  - name: "SQL"
+    aliases: ["Structured Query Language"]
+    tags: ["bases-datos", "consultas"]
+    level: "intermedio"
+    years: 2
+  - name: "Python para análisis de datos"
+    aliases: ["Python", "pandas", "numpy"]
+    tags: ["programación", "data-science"]
+    level: "intermedio"
+    years: 2
+  - name: "VBA"
+    aliases: ["Visual Basic for Applications", "Macros Excel"]
+    tags: ["automatización", "excel"]
+    level: "avanzado"
+    years: 5
+
+certifications: []
+
+languages:
+  - name: "Español"
+    level: "nativo"
+  - name: "Inglés"
+    level: "B2"
+  - name: "Francés"
+    level: "A2"

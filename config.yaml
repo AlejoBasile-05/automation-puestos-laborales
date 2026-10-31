@@ -1,0 +1,53 @@
+# Configuración de JobRadar (versionable, sin secretos)
+# Copia este archivo a config.yaml y ajusta según tus necesidades
+
+search:
+  keywords_include:
+    - "analista financiero"
+    - "financial analyst"
+    - "fp&a"
+    - "planeación financiera"
+  keywords_exclude:
+    - "senior director"
+    - "practicante"
+    - "pasante"
+    - "jefe de departamento"
+  locations:
+    - "Monterrey"
+    - "Nuevo León"
+    - "Ciudad de México"
+    - "Remote"
+    - "Remoto"
+  accept_remote: true
+  max_age_days: 7
+
+llm:
+  provider: "anthropic"        # anthropic | ollama
+  model_scoring: "claude-3-haiku-20240307"   # modelo económico para scoring
+  model_writing: "claude-3-5-sonnet-20241022"  # modelo calidad para redacción
+  max_jobs_per_run: 50
+
+http:
+  requests_per_second: 1
+  timeout_seconds: 20
+
+ats:
+  min_required_coverage: 0.90
+  max_keyword_repetitions: 3
+  max_pages: 2
+  font: "Arial"
+  font_size_pt: 11
+  date_format: "MMM YYYY"
+
+companies:
+  - name: "Empresa Ejemplo Greenhouse"
+    source: "greenhouse"
+    slug: "empresaejemplo"
+  - name: "Empresa Ejemplo Lever"
+    source: "lever"
+    slug: "otraempresa"
+  # - name: "Empresa Ejemplo Workday"
+  #   source: "workday"
+  #   tenant: "unamas"
+  #   wd: 5
+  #   site: "External"
