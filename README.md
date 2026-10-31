@@ -90,6 +90,66 @@ Ver `AGENTS.md` sección 3 para la lista completa. Resumen:
 uv run pytest && uv run ruff check . && uv run mypy src
 ```
 
+## API Reference (campos reales documentados)
+
+### Greenhouse (`boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true`)
+
+**Respuesta:** `{ "jobs": [...] }` — 24 jobs para `medsien`
+
+**Campos clave por job:**
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `id` | integer | ID único de la vacante (ej: 5274077007) |
+| `title` | string | Título del puesto |
+| `location.name` | string | Ubicación (ej: "United States", "Istanbul, Turkey") |
+| `first_published` | ISO 8601 | **Fecha de publicación original** (ej: "2024-11-04T07:05:50-05:00") |
+| `updated_at` | ISO 8601 | **Fecha de última actualización** (ej: "2026-09-10T02:59:06-04:00") |
+| `absolute_url` | string | URL pública para postularse |
+| `content` | string | Descripción completa **HTML escapado** (contiene `<p>`, `<ul>`, `<li>`, `<strong>`, etc.) |
+| `departments[]` | array | Deptos con `id`, `name` |
+| `offices[]` | array | Oficinas con `id`, `name`, `location` |
+| `requisition_id` | string | ID interno de requisición |
+| `internal_job_id` | integer | ID interno alternativo |
+| `education` | string | "education_required" / "education_optional" |
+| `language` | string | "en" |
+| `data_compliance` | array | GDPR info |
+
+**Importante para ingesta:** Usar `first_published` como fecha de publicación (original) y `updated_at` para detectar actualizaciones. El `content` viene HTML-escaped → requiere unescape antes de usar.
+
+---
+
+### Lever (`api.lever.co/v0/postings/{slug}?mode=json`)
+
+**Respuesta:** Array directo `[...]` — 18 jobs para `brafton`
+
+**Campos clave por job:**
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `id` | string (UUID) | ID único (ej: "72674198-21b5-47b9-8358-f240ea108971") |
+| `text` | string | Título del puesto |
+| `createdAt` | integer | **Epoch milliseconds** (ej: 1789498402141 → 2026-09-15) |
+| `categories.location` | string | Ubicación (ej: "Toronto, Ontario", "Netherlands remote") |
+| `categories.department` | string | Departamento |
+| `categories.team` | string | Equipo |
+| `categories.commitment` | string | "Full-Time", "Freelancer", etc. |
+| `categories.allLocations` | array | Todas las ubicaciones |
+| `hostedUrl` | string | URL pública para postularse |
+| `applyUrl` | string | URL de aplicación directa |
+| `descriptionPlain` | string | **Descripción en texto plano** (recomendado para LLM) |
+| `description` | string | Descripción HTML |
+| `descriptionBody` | string | Cuerpo HTML sin opening |
+| `descriptionBodyPlain` | string | Cuerpo en texto plano |
+| `openingPlain` | string | Intro en texto plano |
+| `additionalPlain` | string | Beneficios/info extra en texto plano |
+| `lists[]` | array | Secciones estructuradas (ESSENTIAL JOB FUNCTIONS, SKILLS & REQUIREMENTS) |
+| `salaryRange` | object | `{min, max, currency, interval}` si disponible |
+| `country` | string | Código país ISO (CA, NL, IT, etc.) |
+| `workplaceType` | string | "remote", "onsite", "hybrid" |
+
+**Importante para ingesta:** `createdAt` está en **epoch milliseconds** → convertir a datetime UTC. Preferir `descriptionPlain` / `descriptionBodyPlain` para texto limpio. `categories.location` puede ser "Netherlands remote" (string libre).
+
+---
+
 ## Licencia
 
 Uso personal. Ver `AGENTS.md` para principios no negociables.
