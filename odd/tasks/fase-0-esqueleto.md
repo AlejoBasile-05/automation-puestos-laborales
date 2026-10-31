@@ -73,10 +73,23 @@ Construir el esqueleto del proyecto JobRadar (Fase 0) según AGENTS.md y PLAN.md
   - **Evidencia**: `README.md` reescrito con: descripción del proyecto, instalación (`uv sync`), uso básico (todos los comandos `jobradar` probados), sección de privacidad (data/, .env en gitignore, solo texto al LLM sale), referencia a ODD en `odd/tasks/`, stack tecnológico, comandos de calidad. Comandos verificados: `uv run jobradar --help`, `uv run jobradar --version`, `uv run pytest && uv run ruff check . && uv run mypy src`.
 
 ## Evidencia observada
-_(Se irá completando tras cada tarea)_
+- **T1**: `.gitignore` excluye correctamente `.env`, `data/`, `output/`, `*.sqlite`, `__pycache__`, `.venv`, `.mypy_cache`, `.ruff_cache`. Verificado con `git check-ignore -v`.
+- **T2**: `pyproject.toml` con todas las dependencias de la sección 3 AGENTS.md + grupos dev (pytest, ruff, mypy). `uv sync` limpio, 95 paquetes.
+- **T3**: Estructura completa según sección 4 AGENTS.md. `import jobradar` funciona.
+- **T4**: `config.yaml`, `.env.example`, `config.py` (pydantic v2). 6 tests pasan.
+- **T5**: `examples/cv_master.example.yaml` con esquema sección 7 completo. 11 tests pasan (incl. IDs únicos, no PII).
+- **T6**: `pytest` (17/17), `ruff check .` (clean), `mypy src` (clean).
+- **T7**: CLI `jobradar` instalada con entry point. `--help` y `--version` funcionan.
+- **T8**: `README.md` con descripción, instalación, uso, privacidad, ODD, stack, calidad.
 
 ## Defectos encontrados
-_(Se registrarán si surgen)_
+- Ninguno bloqueante. Advertencias menores de mypy por patrones de override en pyproject.toml (pydantic*, sqlalchemy*, streamlit*) - no afectan funcionalidad.
 
 ## Cierre
-_(Al final: verificación final, resumen, commit final)_
+**Fase 0 COMPLETADA** ✅
+- Commit final: `a0e5b05` ("fase-0: esqueleto completo con config, CLI, tests y README")
+- Todos los criterios de aceptación de PLAN.md sección Fase 0 cumplidos:
+  - `uv sync` funciona en limpio ✅
+  - `uv run pytest && uv run ruff check . && uv run mypy src` pasan ✅
+  - `git status` no muestra `data/` ni `.env` ✅ (verificado con git check-ignore)
+- Listo para **Fase 1: Ingesta de vacantes** (Greenhouse + Lever)
