@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from jobradar.applications import get_application_artifacts, prepare_application
 from jobradar.config import load_config
 from jobradar.db.models import (
     Application,
@@ -22,10 +23,12 @@ from jobradar.db.models import (
     Event,
     Job,
     JobStatus,
+    Score,
     WorkplaceType,
 )
 from jobradar.db.session import get_engine, get_session_factory, init_db
 from jobradar.ingest import IngestSummary, ingest_companies
+from jobradar.scoring import score_pending
 
 LAST_VISIT_FILE = Path("data/last_visit.json")
 
@@ -133,6 +136,53 @@ def get_job_details(job_id: int) -> Job | None:
         return job
 
 
+def get_scores_for_jobs(job_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Devuelve el último score de cada vacante pedida.
+
+    Se resuelve en una sola consulta para no hacer N+1 desde el dashboard.
+
+    Args:
+        job_ids: IDs de vacantes visibles.
+
+    Returns:
+        Mapa ``job_id -> score`` con la fila más reciente por vacante. Un ID
+        sin score simplemente no aparece en el resultado.
+    """
+    if not job_ids:
+        return {}
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        rows = session.scalars(
+            select(Score)
+            .where(Score.job_id.in_(job_ids))
+            .order_by(
+                Score.created_at.desc(),
+                Score.id.desc(),
+            )
+        ).all()
+
+    latest: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if row.job_id in latest:
+            continue
+        latest[row.job_id] = {
+            "score": row.score,
+            "verdict": row.verdict,
+            "matches": row.matches_json or [],
+            "gaps": row.gaps_json or [],
+            "red_flags": row.red_flags_json or [],
+            "model": row.model,
+            "created_at": row.created_at,
+        }
+    return latest
+
+
+def run_scoring(limit: int | None = None) -> dict[str, Any]:
+    """Puntúa vacantes pendientes respetando ``llm.max_jobs_per_run``."""
+    return score_pending(limit=limit)
+
+
 def get_job_events(job_id: int) -> list[Event]:
     """Devuelve el historial de eventos de una vacante, del más reciente al más viejo."""
     session_factory = _get_session_factory()
@@ -232,33 +282,53 @@ def mark_job_discarded(job_id: int) -> None:
     _change_status(job_id, JobStatus.DISCARDED)
 
 
+def _latest_application(session: Session, job_id: int) -> Application | None:
+    """Devuelve la postulación más reciente de una vacante.
+
+    Una vacante puede tener varias ``Application`` (cada regeneración del CV
+    inserta una nueva), así que nunca se usa ``scalar_one_or_none``.
+    """
+    stmt = (
+        select(Application)
+        .where(Application.job_id == job_id)
+        .order_by(Application.created_at.desc(), Application.id.desc())
+    )
+    return session.execute(stmt).scalars().first()
+
+
 def mark_job_applied(job_id: int) -> None:
-    """Marca una vacante como aplicada, crea la postulación y registra el evento."""
+    """Marca una vacante como aplicada y registra el evento.
+
+    Si ya existe una postulación preparada (``applied_at`` vacío) se le pone la
+    fecha; si ya estaba aplicada se rechaza para no duplicar el envío.
+    """
     session_factory = _get_session_factory()
     with session_factory() as session:
-        existing = session.execute(
-            select(Application).where(Application.job_id == job_id)
-        ).scalar_one_or_none()
-        if existing is not None:
-            raise ValueError(f"Ya existe una aplicación para la vacante {job_id}")
-
         job = session.get(Job, job_id)
         if job is None:
             raise ValueError(f"Vacante {job_id} no encontrada")
 
+        application = _latest_application(session, job_id)
+        if application is not None and application.applied_at is not None:
+            raise ValueError(f"Ya existe una aplicación para la vacante {job_id}")
+
         old_status = job.status
         job.status = JobStatus.APPLIED
 
-        session.add(
-            Application(
-                job_id=job_id,
-                tailored_cv_json={},
-                message_text="",
-                language="es",
-                required_coverage=0.0,
-                applied_at=datetime.now(UTC).replace(tzinfo=None),
+        if application is None:
+            session.add(
+                Application(
+                    job_id=job_id,
+                    tailored_cv_json={},
+                    message_text="",
+                    language="es",
+                    required_coverage=0.0,
+                    applied_at=datetime.now(UTC).replace(tzinfo=None),
+                )
             )
-        )
+        else:
+            application.applied_at = datetime.now(UTC).replace(tzinfo=None)
+
         session.add(
             Event(
                 job_id=job_id,
@@ -295,12 +365,10 @@ def _change_status(job_id: int, new_status: JobStatus) -> None:
 
 
 def get_application_notes(job_id: int) -> str:
-    """Devuelve las notas de postulación de una vacante."""
+    """Devuelve las notas de la postulación más reciente de una vacante."""
     session_factory = _get_session_factory()
     with session_factory() as session:
-        application = session.execute(
-            select(Application).where(Application.job_id == job_id)
-        ).scalar_one_or_none()
+        application = _latest_application(session, job_id)
         return application.notes or "" if application is not None else ""
 
 
@@ -308,9 +376,7 @@ def set_application_notes(job_id: int, notes: str) -> None:
     """Guarda las notas de postulación, creando la aplicación si no existe."""
     session_factory = _get_session_factory()
     with session_factory() as session:
-        application = session.execute(
-            select(Application).where(Application.job_id == job_id)
-        ).scalar_one_or_none()
+        application = _latest_application(session, job_id)
 
         if application is None:
             if not notes.strip():
@@ -331,9 +397,30 @@ def set_application_notes(job_id: int, notes: str) -> None:
         session.commit()
 
 
+def save_application_message(application_id: int, message: str) -> None:
+    """Guarda el mensaje de postulación editado en la UI."""
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        application = session.get(Application, application_id)
+        if application is None:
+            raise ValueError(f"Aplicación {application_id} no encontrada")
+        application.message_text = message
+        session.commit()
+
+
 # ---------------------------------------------------------------------------
-# Ingesta y última visita
+# Preparación de postulaciones
 # ---------------------------------------------------------------------------
+
+
+def run_prepare_application(job_id: int) -> dict[str, Any]:
+    """Wrapper para preparar la postulación de una vacante."""
+    return prepare_application(job_id)
+
+
+def get_application_artifacts_query(job_id: int) -> dict[str, Any] | None:
+    """Wrapper para obtener los artefactos de la postulación."""
+    return get_application_artifacts(job_id)
 
 
 def run_ingest() -> IngestSummary:

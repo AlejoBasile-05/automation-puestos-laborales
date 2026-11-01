@@ -19,9 +19,9 @@ Aplicación **local** (corre en mi computadora, datos en mi disco) que:
 
 1. **Nunca inventar experiencia.** El CV generado solo puede usar hechos presentes en `data/cv_master.yaml`. Se valida por código (ver sección 7), no solo con el prompt.
 2. **Humano en el circuito.** Prohibido automatizar el envío de formularios, el llenado de portales o la interacción con CAPTCHAs.
-3. **Fuentes legítimas.** Solo APIs públicas de vacantes. **No** hacer scraping de Google, LinkedIn ni de ninguna página que lo prohíba.
+3. **Fuentes legítimas.** Solo APIs públicas de vacantes. **No** hacer scraping de Google, LinkedIn ni de ninguna página que lo prohíba. Nota: para el descubrimiento de empresas (Fase 7) se usa una **API comercial de búsqueda** (Serper, Brave o Google CSE) con key propia; eso no es scraping propio, pero cada proveedor tiene sus términos y hay que respetarlos.
 4. **Cortesía con los servidores.** Máximo 1 request/segundo por host, `User-Agent` identificable, reintentos con backoff exponencial, respetar `Retry-After`. Cachear respuestas para no repetir peticiones.
-5. **Local-first y privacidad.** Nada de telemetría, ni servicios en la nube propios, ni subir datos a repositorios. El único dato que sale de la máquina es el texto enviado a la API del LLM que yo configure (y debe quedar documentado en el README).
+5. **Local-first y privacidad.** Nada de telemetría, ni servicios en la nube propios, ni subir datos a repositorios. Lo único que sale de la máquina es el texto enviado a la API del LLM que yo configure y la consulta de búsqueda enviada al proveedor de descubrimiento (ambas documentadas en el README).
 6. **Secretos fuera del código.** API keys solo en `.env` (ignorado por git). Nunca en logs.
 7. **Reproducible y testeable.** Cada módulo con tests usando *fixtures* de respuestas reales guardadas; los tests no deben hacer llamadas de red ni consumir tokens.
 8. **ATS sin trampas.** Se optimiza la legibilidad del archivo, la coincidencia literal de los términos que realmente cumplo y los filtros eliminatorios. Está prohibido: texto oculto, blanco o diminuto; relleno de palabras clave; copiar requisitos de la vacante que no estén respaldados en el CV maestro.
@@ -285,7 +285,7 @@ Nota de alcance: muchos ATS no calculan un "puntaje" automático; los resultados
 
 ### 9.1 Flujo (en este orden)
 
-1. **Extracción de requisitos de la vacante** (LLM, `prompts/ats_extract_v1.md`). Salida JSON validada con pydantic:
+1. **Extracción de requisitos de la vacante** (LLM, `src/jobradar/prompts/ats_extract_v1.md`). Salida JSON validada con pydantic:
 
 ```json
 {
@@ -317,7 +317,7 @@ Nota de alcance: muchos ATS no calculan un "puntaje" automático; los resultados
    - Ignorar relleno corporativo ("proactivo", "dinámico", "trabajo en equipo") salvo que sea una competencia concreta y medible.
 
 2. **Matching determinista** (`ats_keywords.py`, **sin LLM**). Normaliza (minúsculas, sin acentos, plural simple, siglas ↔ forma completa, `aliases` del maestro) y busca cada keyword con límites de palabra en skills, aliases, tags, bullets y certificaciones del CV maestro. Resultado por keyword: `supported` (con los `id` de evidencia) o `gap`. Debe distinguir casos como "Java" vs "JavaScript".
-3. **Generación** (LLM, `prompts/tailoring_v1.md`). Recibe **solo** las keywords `supported` con su evidencia. Nunca ve las `gap` como algo que deba incorporar.
+3. **Generación** (LLM, `src/jobradar/prompts/tailoring_v1.md`). Recibe **solo** las keywords `supported` con su evidencia. Nunca ve las `gap` como algo que deba incorporar.
 4. **Validación determinista** del contenido (sección 7) y **cálculo de cobertura** (9.2).
 5. **Render** a PDF y DOCX (9.3).
 6. **Verificación del archivo** con `ats_check.py` (9.4).
@@ -412,6 +412,10 @@ ats:
   font: "Arial"
   font_size_pt: 11
   date_format: "MMM YYYY"
+discovery:                    # Fase 7 — proveedor de búsqueda de portales
+  provider: serper            # serper | brave | google_cse
+  max_queries_per_run: 5
+  cache_ttl_hours: 24
 companies: []                # ver sección 5
 ```
 

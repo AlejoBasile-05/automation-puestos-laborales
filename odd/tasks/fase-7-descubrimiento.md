@@ -207,4 +207,63 @@ extracción con `prompts/ats_extract_v1.md`. Además, `src/jobradar/prompts/`
 está trackeado y muerto: el código lee `prompts/` desde la raíz del repo, así
 que los comandos dependen del cwd. Ambas cosas quedan pendientes de decisión.
 
+L11 — Slice posterior a la Fase 7 (2026-11-01). Sobre HEAD `5e13cd6` quedó un
+slice sin commitear con: descubrimiento multi-proveedor (`src/jobradar/
+discovery/` con `base`, `brave`, `google_cse`, `serper`, `factory`),
+orquestación de postulaciones (`src/jobradar/applications.py`), página
+"Preparar postulación" del dashboard, cableado real de la extracción ATS con
+LLM (`extract_requirements`/`ensure_requirements` con reintento, validación
+pydantic y caché en `job_requirements`) y tests nuevos
+(`test_applications.py`, `test_ats_extraction.py`, `test_discovery_providers.py`).
+
+Decisiones tomadas en este slice:
+- La deuda L10 quedó resuelta: los prompts canónicos viven en
+  `src/jobradar/prompts/` (AGENTS.md §4/§8.3), con el contenido rico antes
+  ubicado en la raíz. `prompts/` de la raíz se eliminó.
+- `src/jobradar/paths.py` expone `PROMPTS_DIR` y `prompt_path(name)`; los tres
+  consumidores (`ats_keywords`, `scoring`, `tailoring`) resuelven sus prompts
+  de forma relativa al paquete, sin depender del cwd.
+- Se agregó `tests/test_scoring.py` (6 tests: caché, persistencia, invalidación
+  por `prompt_version`, tipo inválido, límites del esquema, hash del CV), que
+  cierra el hueco "sin tests de scoring" de la Fase 3.
+- Se agregó `tests/test_prompts.py` (6 tests): existencia, placeholders,
+  `PROMPT_PATH` dentro del paquete y carga tras `chdir(tmp_path)`.
+
+Evidencia de verificación observada:
+- `uv run pytest -q` → `213 passed`.
+- `uv run ruff check .` → `All checks passed!`.
+- `uv run mypy src` → `Success: no issues found in 35 source files`.
+- Smoke `streamlit.testing.v1.AppTest` sobre las 5 páginas del dashboard →
+  `[OK] Vacantes`, `[OK] Seguimiento`, `[OK] Preparar postulación`,
+  `[OK] Configuración`, `[OK] Descubrimiento`.
+
+Nota de runtime: se intentó delegar la implementación a `gentle-ai-worker` y la
+verificación a `gentle-ai-verify`. El worker falló con `403` del proveedor
+("model not available in your subscription tier"); la verificación se completó y
+reportó un falso positivo (marcó como "stale" el comentario correcto
+`src/jobradar/prompts/ats_extract_v1.md`). El slice se implementó inline y se
+verificó con los comandos de arriba. Sin commit.
+
+L12 — Integración de scoring en CLI y dashboard (2026-11-01). Se cerraron dos
+huecos de AGENTS.md §8.4 y §10.1:
+
+- Tope de costo: `resolve_run_limit(limit, configured)` en `scoring.py`;
+  `score_pending(limit=None)` resuelve contra `llm.max_jobs_per_run` y devuelve
+  `limit` en el resultado. `jobradar score --limit` pasó a opcional y un valor
+  mayor al tope se recorta (antes se podía pedir `--limit 1000` y gastar de más).
+- Dashboard: `get_scores_for_jobs()` (una sola consulta, último score por
+  vacante) y `run_scoring()` en `dashboard_queries.py`; la página **Vacantes**
+  muestra columnas **Puntaje** y **Veredicto**, botón **Puntuar pendientes** y
+  panel de coincidencias/brechas/alertas en el detalle. Toda la lógica sigue en
+  la librería (AGENTS.md §12).
+- Bug detectado al smoke-testear: mezclar `int` y `"—"` en la columna Puntaje
+  rompía `st.dataframe` con `pyarrow.lib.ArrowTypeError`. Se normalizó a string
+  (`"88/100"` / `"—"`).
+- Tests nuevos: `resolve_run_limit` (4 casos), `get_scores_for_jobs` (último
+  score, claves, lista vacía) y `run_scoring` (delegación con límite).
+
+Evidencia observada: `uv run pytest -q` → `220 passed`; `ruff` → `All checks
+passed!`; `mypy src` → `Success: no issues found in 35 source files`; AppTest
+5/5 páginas OK. Sin commit.
+
 

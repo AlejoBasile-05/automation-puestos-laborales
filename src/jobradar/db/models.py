@@ -140,7 +140,7 @@ class JobRequirement(Base):
     prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     keywords_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=list)
-    knockouts_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=list)
+    knockouts_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     # Relaciones

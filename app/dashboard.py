@@ -5,6 +5,7 @@ Interfaz solamente: toda la consulta y las mutaciones viven en
 """
 
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
@@ -14,6 +15,7 @@ from jobradar.dashboard_queries import (
     JobFilters,
     export_jobs_to_csv,
     get_all_jobs_with_status,
+    get_application_artifacts_query,
     get_application_notes,
     get_filtered_jobs,
     get_job_details,
@@ -21,10 +23,14 @@ from jobradar.dashboard_queries import (
     get_jobs_by_status,
     get_jobs_without_response,
     get_last_visit,
+    get_scores_for_jobs,
     mark_job_applied,
     mark_job_discarded,
     mark_job_reviewed,
     run_ingest,
+    run_prepare_application,
+    run_scoring,
+    save_application_message,
     set_application_notes,
     set_last_visit,
 )
@@ -38,13 +44,20 @@ if "last_visit" not in st.session_state:
 
 STATUS_OPTIONS = ["Todos", *(status.value for status in JobStatus)]
 
+
+def _normalize_ats_check(outcome: object) -> tuple[bool, str]:
+    """Normaliza un chequeo ATS guardado como tupla o lista JSON."""
+    if isinstance(outcome, (list, tuple)) and len(outcome) >= 2:
+        return bool(outcome[0]), str(outcome[1])
+    return False, "Formato de chequeo desconocido"
+
 # ---------------------------------------------------------------------------
 # Navegación y filtros
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("JobRadar")
     page = st.radio(
-        "Ir a", ["Vacantes", "Seguimiento", "Configuración", "Descubrimiento"]
+        "Ir a", ["Vacantes", "Seguimiento", "Preparar postulación", "Configuración", "Descubrimiento"]
     )
     st.divider()
 
@@ -98,8 +111,25 @@ if page == "Vacantes":
         only_open=only_open,
     )
     jobs = get_filtered_jobs(filters, st.session_state.last_visit)
+    scores = get_scores_for_jobs([job.id for job in jobs])
 
     st.title("Vacantes")
+
+    if st.button("Puntuar pendientes", key="score-pending"):
+        with st.spinner("Puntuando vacantes pendientes..."):
+            st.session_state.score_summary = run_scoring()
+        st.rerun()
+
+    if "score_summary" in st.session_state:
+        score_summary = st.session_state.score_summary
+        st.success(
+            f"Scoring completado: {score_summary['scored']} puntuadas, "
+            f"{score_summary['cached']} en caché, "
+            f"{score_summary['errors']} errores "
+            f"(límite {score_summary.get('limit', '?')})."
+        )
+        del st.session_state.score_summary
+
     if not jobs:
         st.info("No se encontraron vacantes con los filtros actuales")
     else:
@@ -115,6 +145,14 @@ if page == "Vacantes":
                         job.posted_at.strftime("%Y-%m-%d")
                         if job.posted_at
                         else "Desconocida"
+                    ),
+                    "Puntaje": (
+                        f"{scores[job.id]['score']}/100"
+                        if job.id in scores
+                        else "—"
+                    ),
+                    "Veredicto": (
+                        scores[job.id]["verdict"] if job.id in scores else "—"
                     ),
                     "Estado": "Nueva" if job.is_new else str(job.status),
                 }
@@ -144,6 +182,26 @@ if page == "Vacantes":
                 st.write(f"**URL:** {job_details.url or 'No disponible'}")
                 st.subheader("Descripción")
                 st.write(job_details.description_text)
+
+                job_score = scores.get(job.id)
+                if job_score:
+                    st.subheader("Puntuación de compatibilidad")
+                    st.metric(
+                        "Score",
+                        f"{job_score['score']}/100",
+                        job_score["verdict"],
+                    )
+                    for label, values in (
+                        ("Coincidencias", job_score["matches"]),
+                        ("Brechas", job_score["gaps"]),
+                        ("Alertas", job_score["red_flags"]),
+                    ):
+                        if values:
+                            st.write(f"**{label}:**")
+                            for item in values:
+                                st.write(f"- {item}")
+                else:
+                    st.caption("Sin puntaje todavía.")
 
                 st.subheader("Historial de eventos")
                 events = get_job_events(job.id)
@@ -258,6 +316,143 @@ elif page == "Seguimiento":
         st.info("No hay vacantes sin respuesta pendientes")
 
 # ---------------------------------------------------------------------------
+# Página: Preparar postulación (Fase 4C)
+# ---------------------------------------------------------------------------
+elif page == "Preparar postulación":
+    st.title("Preparar postulación")
+
+    candidate_jobs = get_filtered_jobs(JobFilters(only_open=True))
+    if not candidate_jobs:
+        st.info("No hay vacantes abiertas para preparar.")
+    else:
+        job_options = {
+            job.id: (
+                f"#{job.id} — {job.title} "
+                f"({job.company.name if job.company else 'N/A'})"
+            )
+            for job in candidate_jobs
+        }
+        job_id = st.selectbox(
+            "Seleccionar vacante",
+            options=list(job_options),
+            format_func=lambda value: job_options[value],
+        )
+
+        job = get_job_details(job_id)
+        if job is not None and job.url:
+            st.link_button("Abrir enlace de la vacante", job.url)
+
+        if st.button("Preparar CV y mensaje"):
+            with st.spinner("Generando CV adaptado y reporte ATS..."):
+                result = run_prepare_application(job_id)
+            if result.get("exito"):
+                st.success(
+                    "Postulación preparada en "
+                    f"{result.get('output_dir', 'output')} "
+                    f"(cobertura requerida {result['required_coverage']:.0%})."
+                )
+            else:
+                st.error(result.get("error", "Error desconocido"))
+
+        app_data = get_application_artifacts_query(job_id)
+        if not app_data:
+            st.info("Esta vacante todavía no tiene una postulación preparada.")
+        else:
+            tailored = app_data["tailored"] or {}
+
+            st.subheader("Vista previa del CV adaptado")
+            st.write(f"**Headline:** {tailored.get('headline', 'N/A')}")
+            st.write(f"**Resumen:** {tailored.get('summary', 'N/A')}")
+            st.write(f"**Habilidades:** {', '.join(tailored.get('skills', []))}")
+            st.write(
+                f"**Keywords usados:** "
+                f"{', '.join(tailored.get('keywords_used', []))}"
+            )
+            for experience in tailored.get("experience", []):
+                st.write(
+                    f"- {experience.get('experience_id', '')}: "
+                    f"{', '.join(experience.get('bullet_ids', []))}"
+                )
+
+            st.subheader("Panel ATS")
+            st.metric(
+                "Cobertura requerida", f"{app_data['required_coverage']:.0%}"
+            )
+            for check_name, outcome in (app_data.get("ats_report") or {}).items():
+                passed, message = _normalize_ats_check(outcome)
+                st.write(f"{'✅' if passed else '❌'} **{check_name}**: {message}")
+
+            keywords = app_data.get("keywords") or []
+            supported = [kw for kw in keywords if kw.get("status") == "supported"]
+            gaps = [kw for kw in keywords if kw.get("status") == "gap"]
+            st.write(
+                f"**Keywords cubiertas ({len(supported)}):** "
+                f"{', '.join(kw.get('term', '') for kw in supported) or '—'}"
+            )
+            st.write(
+                f"**Brechas que no tenés ({len(gaps)}):** "
+                f"{', '.join(kw.get('term', '') for kw in gaps) or '—'}"
+            )
+
+            knockouts = app_data.get("knockouts") or []
+            if knockouts:
+                st.write("**Filtros eliminatorios:**")
+                for knockout in knockouts:
+                    requirement = knockout.get("requirement", "")
+                    status = knockout.get("status", "unknown")
+                    st.write(f"- {requirement}: **{status}**")
+                    if status == "not_met" and knockout.get("mandatory"):
+                        st.warning(
+                            f"Requisito obligatorio no cumplido: {requirement}"
+                        )
+
+            st.subheader("Mensaje de postulación")
+            message = st.text_area(
+                "Mensaje editable",
+                value=app_data.get("message_text", ""),
+                height=200,
+                key=f"message_{app_data['application_id']}",
+            )
+            if st.button("Guardar mensaje"):
+                save_application_message(app_data["application_id"], message)
+                st.success("Mensaje guardado")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                pdf_path = app_data.get("pdf_path")
+                if pdf_path and Path(pdf_path).exists():
+                    st.download_button(
+                        "Descargar PDF",
+                        Path(pdf_path).read_bytes(),
+                        file_name=Path(pdf_path).name,
+                        mime="application/pdf",
+                    )
+            with col2:
+                docx_path = app_data.get("docx_path")
+                if docx_path and Path(docx_path).exists():
+                    st.download_button(
+                        "Descargar DOCX",
+                        Path(docx_path).read_bytes(),
+                        file_name=Path(docx_path).name,
+                        mime=(
+                            "application/vnd.openxmlformats-officedocument"
+                            ".wordprocessingml.document"
+                        ),
+                    )
+
+            st.caption("Copiá el mensaje con el botón de copiar del bloque:")
+            st.code(app_data.get("message_text", ""), language="text")
+
+            if st.button("Marcar como aplicada"):
+                try:
+                    mark_job_applied(job_id)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Vacante marcada como aplicada")
+                    st.rerun()
+
+# ---------------------------------------------------------------------------
 # Página: Configuración
 # ---------------------------------------------------------------------------
 elif page == "Configuración":
@@ -332,11 +527,17 @@ elif page == "Configuración":
 # Página: Descubrimiento (Fase 7)
 # ---------------------------------------------------------------------------
 elif page == "Descubrimiento":
+    discovery_config = load_config().discovery
     st.title("Descubrimiento de empresas")
     st.caption(
-        "Busca portales de Greenhouse, Lever y Workday con la Brave Search API. "
-        "Ninguna empresa se añade automáticamente: copia el bloque YAML y pégalo "
-        "en config.yaml."
+        "Busca portales de Greenhouse, Lever y Workday con el proveedor de "
+        "búsqueda configurado. Ninguna empresa se añade automáticamente: copia "
+        "el bloque YAML y pégalo en config.yaml."
+    )
+    st.info(
+        f"Proveedor activo: **{discovery_config.provider}** · "
+        f"máximo {discovery_config.max_queries_per_run} consultas por corrida · "
+        "caché de 24 h. Google CSE tiene 100 consultas gratis por día."
     )
 
     query = st.text_input(
@@ -347,7 +548,7 @@ elif page == "Descubrimiento":
 
     if st.button("Buscar empresas"):
         try:
-            client = CompanyDiscoveryClient()
+            client = CompanyDiscoveryClient(config=discovery_config)
             candidates = client.discover_companies(query, limit)
         except (ValueError, RuntimeError) as exc:
             st.error(str(exc))

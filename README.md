@@ -39,6 +39,7 @@ uv run jobradar probe lever <slug>
 uv run jobradar ingest
 
 # Scoring de compatibilidad
+# Respeta llm.max_jobs_per_run; un --limit mayor se recorta a ese tope.
 uv run jobradar score --limit 20
 
 # Ver keywords y knockouts
@@ -67,22 +68,48 @@ uv run jobradar discover "<consulta>" --limit 10
 
 Qué hace:
 
-1. Consulta la **Brave Search API** con la consulta que le pases (por ejemplo
-   `site:boards.greenhouse.io "analista financiero" Monterrey`).
+1. Consulta el **proveedor de búsqueda configurado** con la consulta que le
+   pases (por ejemplo `site:boards.greenhouse.io "analista financiero" Monterrey`).
 2. Extrae los slugs de los portales encontrados: `boards.greenhouse.io`,
    `job-boards.greenhouse.io`, `jobs.lever.co` y `myworkdayjobs.com`.
 3. Valida cada candidata con `probe` y muestra cuántas vacantes tiene.
 4. Imprime un bloque YAML de ejemplo. **Nunca** modifica `config.yaml`: tú
    decides qué añadir.
 
+### Proveedores disponibles
+
+Se elige con `discovery.provider` en `config.yaml`. El resto del sistema
+—extracción de slugs, deduplicación, caché, CLI y dashboard— es común.
+
+| Proveedor | `discovery.provider` | Credenciales | Costo y cuota | Vigencia |
+|---|---|---|---|---|
+| Serper.dev | `serper` | `SERPER_API_KEY` | **2.500 consultas gratis, sin tarjeta**; 1 crédito por request | Activa |
+| Google Custom Search JSON API | `google_cse` | `GOOGLE_API_KEY` **y** `GOOGLE_CSE_ID` | **Solo clientes existentes**: 100 consultas/día gratis; después US$ 5 / 1.000 | **Cerrada a clientes nuevos; se apaga el 2027-01-01**. Un proyecto nuevo recibe `403 forbidden: "This project does not have the access to Custom Search JSON API"` |
+| Brave Search API | `brave` | `BRAVE_SEARCH_API_KEY` | US$ 5 / 1.000 requests; incluye US$ 5 de crédito mensual (≈ 1.000). Pide tarjeta | Activa |
+
+Particularidad de Serper en cuentas gratuitas, verificada contra la API: una
+consulta con el operador `site:` solo admite **10 resultados por página**
+(`400 "Query pattern not allowed for free accounts"` con más). El adaptador
+respeta ese tope y pagina con `page` cuando pedís más de 10, así que
+`--limit 20` cuesta 2 créditos y no falla.
+
+`GOOGLE_CSE_ID` es el **Search engine ID** del
+[Programmable Search Engine](https://programmablesearchengine.google.com/controlpanel/all),
+no la API key: sin él la key no consulta nada. Conviene configurar el motor con
+los cuatro dominios de portales de empleo para que los resultados no sean web
+genérica.
+
 Límites y cortesía:
 
-- Máximo 1 request por segundo.
+- Máximo 1 request por segundo, con timeout explícito.
 - `discovery.max_queries_per_run` (por defecto `5`) corta la corrida si se
   supera; `discovery.cache_ttl_hours` (por defecto `24`) reutiliza resultados.
-- Requiere `BRAVE_SEARCH_API_KEY` en `.env` (key gratuita en
-  <https://search.brave.com/>). Sin la key el comando sale con código 1 y un
-  mensaje claro, sin tocar la red.
+  Una consulta con `--limit` mayor a 10 se pagina y consume **varias** unidades
+  de cuota del proveedor.
+- Sin credenciales el comando sale con código 1 y un mensaje que nombra la
+  variable faltante, sin tocar la red. Si el proveedor rechaza la credencial, el
+  error incluye el `reason` de Google (`forbidden`, `dailyLimitExceeded`,
+  `accessNotConfigured`) para no adivinar la causa.
 
 La misma función está disponible en el dashboard, página **Descubrimiento**.
 
@@ -90,10 +117,11 @@ La misma función está disponible en el dashboard, página **Descubrimiento**.
 
 El dashboard Streamlit proporciona una interfaz gráfica para:
 
-1. **Vacantes**: tabla con filtros (texto, empresa, fuente, ubicación/remoto, rango de fechas, estado, solo abiertas), detalle completo e historial de eventos.
+1. **Vacantes**: tabla con filtros (texto, empresa, fuente, ubicación/remoto, rango de fechas, estado, solo abiertas), columnas de **Puntaje** y **Veredicto**, botón **Puntuar pendientes** (con el mismo tope `llm.max_jobs_per_run`), detalle completo con coincidencias/brechas/alertas e historial de eventos.
 2. **Seguimiento**: conteo por estado, notas, fecha de postulación, recordatorios de postulaciones sin respuesta y exportación a CSV.
-3. **Configuración**: empresas, filtros y proveedor LLM en solo lectura (se editan en `config.yaml`).
-4. **Descubrimiento**: empresas candidatas vía Brave Search, validadas con `probe` y con el bloque YAML listo para copiar.
+3. **Preparar postulación**: CV adaptado, panel ATS, keywords cubiertas vs. brechas, knockouts y mensaje editable.
+4. **Configuración**: empresas, filtros y proveedor LLM en solo lectura (se editan en `config.yaml`).
+5. **Descubrimiento**: empresas candidatas vía el proveedor configurado, validadas con `probe` y con el bloque YAML listo para copiar.
 
 Para acceder al dashboard, ejecuta:
 
@@ -106,8 +134,10 @@ uv run jobradar dashboard
 1. Copia `config.yaml` y ajusta tus filtros, empresas objetivo y modelo LLM.
 2. Copia `.env.example` a `.env` y agrega tus claves:
    - `ANTHROPIC_API_KEY` (si usas provider: anthropic)
-   - `NVIDIA_API_KEY` (si usas provider: nvidia — modelo gratuito, key en https://build.nvidia.com/)
-   - `BRAVE_SEARCH_API_KEY` (opcional, para `jobradar discover` — key gratuita en https://search.brave.com/)
+   - `NVIDIA_API_KEY` (si usas provider: nvidia — con créditos gratuitos, key en https://build.nvidia.com/)
+   - `BRAVE_SEARCH_API_KEY` (opcional, solo para `jobradar discover` con `provider: brave` — de pago: US$ 5 / 1.000 requests con US$ 5 de crédito mensual, key en https://api-dashboard.search.brave.com/register)
+   - `SERPER_API_KEY` (opcional, solo para `jobradar discover` con `provider: serper` — 2.500 consultas gratis sin tarjeta, key en https://serper.dev/)
+   - `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` (opcional, solo para `jobradar discover` con `provider: google_cse` — solo clientes existentes; el `CSE_ID` es el Search engine ID del Programmable Search Engine, no la API key)
    - O configura Ollama localmente (provider: ollama)
 3. Copia `examples/cv_master.example.yaml` a `data/cv_master.yaml` y completa con tus datos reales.
 
@@ -118,8 +148,9 @@ uv run jobradar dashboard
   - Con **Nvidia NIM**: el texto se envía a los servidores de Nvidia. Verifica sus términos de privacidad.
   - Con **Ollama local**: nada sale de tu máquina (100% privado).
 - **Descubrimiento de empresas** (`jobradar discover`): lo único que sale es la
-  consulta de búsqueda que escribes, enviada a la Brave Search API. No se envían
-  tu CV, tus vacantes ni tus postulaciones.
+  consulta de búsqueda que escribes, enviada al proveedor configurado en
+  `discovery.provider` (Serper, Brave o Google Custom Search). No se envían tu
+  CV, tus vacantes ni tus postulaciones.
 - No hay telemetría, ni servicios en la nube propios, ni subida de datos a repositorios.
 - Logging a `data/logs/` sin CV ni API keys.
 
@@ -136,7 +167,7 @@ Este proyecto sigue la metodología **ODD (Opencode-Driven Development)**. Las t
 Ver `AGENTS.md` sección 3 para la lista completa. Resumen:
 - Python 3.11+, uv
 - httpx, SQLAlchemy 2.x + alembic, pydantic v2
-- Streamlit, Anthropic SDK, Ollama (opcional), Nvidia NIM (opcional, API gratuita con key)
+- Streamlit, Anthropic SDK, Ollama (opcional), Nvidia NIM (opcional, créditos gratuitos con key)
 - Jinja2 + WeasyPrint (PDF), python-docx (DOCX)
 - pdfplumber (verificación ATS)
 - pytest, ruff, mypy
