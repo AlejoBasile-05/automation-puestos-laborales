@@ -266,4 +266,19 @@ Evidencia observada: `uv run pytest -q` → `220 passed`; `ruff` → `All checks
 passed!`; `mypy src` → `Success: no issues found in 35 source files`; AppTest
 5/5 páginas OK. Sin commit.
 
+L13 — Commits del slice (2026-11-01). El usuario aprobó explícitamente armar los
+commits. Se partió el trabajo en 4 unidades revisables sobre `main` (sin push):
+
+| Commit | Contenido |
+|---|---|
+| `3dd14c1` | fase-7: descubrimiento multi-proveedor con serper, brave y google_cse |
+| `605d7ea` | fase-4: extracción ATS con LLM, postulaciones y prompts empaquetados |
+| `9f27fcb` | fase-3: scoring en dashboard, cap de corrida y documentación |
+| `1d5eb5b` | fase-3: tests de integración de scoring en el dashboard |
+
+Verificación posterior a los commits: `uv run pytest -q` → `220 passed`;
+`ruff` → `All checks passed!`; `mypy src` → limpio (35 archivos). Árbol limpio.
+`gentle-ai review assess --base-ref 5e13cd6 --committed-only` → `risk: medium`,
+`review_due: false` (`under_budget`); no se inicia ciclo de revisión.
+
 
