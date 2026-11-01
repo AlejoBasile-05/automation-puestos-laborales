@@ -1,10 +1,19 @@
 """Extracción de requisitos ATS y matching determinista de keywords."""
 
+import hashlib
 import re
 import unicodedata
+from collections.abc import Callable
 from typing import Any, cast
 
 import yaml
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from jobradar.db.models import Job, JobRequirement
+from jobradar.llm.base import LLMClient
+from jobradar.paths import prompt_path
 
 
 def normalize_text(text: str) -> str:
@@ -189,18 +198,248 @@ def match_keywords(keywords: list[dict], cv_master_path: str) -> list[dict]:
     return results
 
 
-def extract_requirements(job_description: str) -> dict:
+PROMPT_VERSION = "ats_extract_v1"
+PROMPT_PATH = prompt_path("ats_extract_v1.md")
+
+EXTRACTION_SYSTEM_PROMPT = (
+    "Eres un analista de reclutamiento. Extraes los requisitos de una vacante "
+    "para análisis ATS. Responde siempre en JSON válido y no inventes requisitos."
+)
+
+_KEYWORD_TYPES = frozenset(
+    {
+        "tool",
+        "hard_skill",
+        "certification",
+        "title",
+        "domain",
+        "methodology",
+        "soft_skill",
+    }
+)
+_KEYWORD_IMPORTANCES = frozenset({"required", "preferred", "mentioned"})
+_KNOCKOUT_TYPES = frozenset(
+    {
+        "years_experience",
+        "education",
+        "language",
+        "location",
+        "certification",
+        "work_authorization",
+        "other",
+    }
+)
+
+
+class ExtractedKeyword(BaseModel):
+    """Keyword extraída de la vacante."""
+
+    term: str = Field(min_length=1)
+    type: str = "hard_skill"
+    importance: str = "mentioned"
+    synonyms: list[str] = Field(default_factory=list)
+    frequency_in_posting: int = Field(default=0, ge=0)
+
+    @field_validator("type")
+    @classmethod
+    def _normalize_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        return normalized if normalized in _KEYWORD_TYPES else "hard_skill"
+
+    @field_validator("importance")
+    @classmethod
+    def _normalize_importance(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        return normalized if normalized in _KEYWORD_IMPORTANCES else "mentioned"
+
+
+class ExtractedKnockout(BaseModel):
+    """Filtro eliminatorio extraído de la vacante."""
+
+    type: str = "other"
+    requirement: str = ""
+    value: float | None = None
+    area: str | None = None
+    mandatory: bool = False
+
+    @field_validator("type")
+    @classmethod
+    def _normalize_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        return normalized if normalized in _KNOCKOUT_TYPES else "other"
+
+
+class ATSExtraction(BaseModel):
+    """Salida validada de la extracción de requisitos (AGENTS.md §9.1)."""
+
+    job_title_exact: str = ""
+    language: str = "es"
+    keywords: list[ExtractedKeyword] = Field(default_factory=list)
+    knockouts: list[ExtractedKnockout] = Field(default_factory=list)
+
+    @field_validator("language")
+    @classmethod
+    def _normalize_language(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized.startswith("en"):
+            return "en"
+        if normalized.startswith("es"):
+            return "es"
+        return "es"
+
+
+def extract_requirements(
+    job_description: str,
+    llm: LLMClient | None = None,
+) -> dict[str, Any]:
     """Extrae keywords y knockouts de la descripción de la vacante.
 
-    Esta función es un placeholder. La extracción real se hace con el LLM
-    usando prompts/ats_extract_v1.md desde scoring.py.
+    La extracción la hace el LLM con ``src/jobradar/prompts/ats_extract_v1.md``. El LLM solo
+    EXTRAE requisitos: nunca decide si algo está respaldado en el CV. Esa
+    decisión es determinista y vive en :func:`match_keywords`.
 
-    Nota: el LLM solo se usa para EXTRAER requisitos, nunca para decidir
-    si algo está respaldado en el CV.
+    Args:
+        job_description: Texto de la vacante.
+        llm: Cliente LLM. Si es ``None`` se crea uno con la configuración.
+
+    Returns:
+        Diccionario validado con ``job_title_exact``, ``language``,
+        ``keywords`` y ``knockouts``.
+
+    Raises:
+        RuntimeError: si la extracción falla tras el reintento.
     """
+    client = llm or _default_llm()
+    prompt = render_extraction_prompt(job_description)
+    return _extract_with_retry(client, prompt).model_dump()
+
+
+def render_extraction_prompt(
+    job_description: str,
+    template: str | None = None,
+) -> str:
+    """Inserta la descripción de la vacante en la plantilla del prompt."""
+    base = template if template is not None else load_extraction_prompt()
+    return base.replace("{job_description}", job_description)
+
+
+def load_extraction_prompt() -> str:
+    """Carga la plantilla del prompt de extracción."""
+    if not PROMPT_PATH.exists():
+        raise FileNotFoundError(f"No se encontró {PROMPT_PATH}")
+    return PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def compute_description_hash(job_description: str) -> str:
+    """Hash SHA256 de la descripción, clave de caché de requisitos."""
+    return hashlib.sha256(job_description.encode("utf-8")).hexdigest()
+
+
+def ensure_requirements(
+    job: Job,
+    session_factory: Callable[[], Session],
+    llm: LLMClient,
+    prompt_version: str = PROMPT_VERSION,
+) -> dict[str, Any]:
+    """Devuelve los requisitos de una vacante, usando la caché de ``job_requirements``.
+
+    La caché se indexa por ``(job_id, description_hash, prompt_version)``: si no
+    cambió la descripción ni el prompt, no se vuelve a gastar una llamada al LLM.
+    """
+    description = job.description_text or ""
+    description_hash = compute_description_hash(description)
+
+    with session_factory() as session:
+        cached = session.scalars(
+            select(JobRequirement).where(
+                JobRequirement.job_id == job.id,
+                JobRequirement.description_hash == description_hash,
+                JobRequirement.prompt_version == prompt_version,
+            )
+        ).first()
+        if cached is not None:
+            return _cached_payload(cached)
+
+    extraction = extract_requirements(description, llm=llm)
+
+    with session_factory() as session:
+        session.add(
+            JobRequirement(
+                job_id=job.id,
+                description_hash=description_hash,
+                prompt_version=prompt_version,
+                model=llm.model_name,
+                keywords_json={
+                    "job_title_exact": extraction["job_title_exact"],
+                    "language": extraction["language"],
+                    "keywords": extraction["keywords"],
+                },
+                knockouts_json=extraction["knockouts"],
+            )
+        )
+        session.commit()
+
+    return extraction
+
+
+def _cached_payload(record: JobRequirement) -> dict[str, Any]:
+    """Reconstruye el diccionario de requisitos desde una fila cacheada."""
+    stored = cast(Any, record.keywords_json) or {}
+    if isinstance(stored, dict):
+        keywords = stored.get("keywords", [])
+        job_title = stored.get("job_title_exact", "")
+        language = stored.get("language", "es")
+    else:
+        # Formato plano (solo lista de keywords) por compatibilidad.
+        keywords = stored
+        job_title = ""
+        language = "es"
+
     return {
-        "job_title_exact": "",
-        "language": "es",
-        "keywords": [],
-        "knockouts": [],
+        "job_title_exact": job_title,
+        "language": language,
+        "keywords": keywords,
+        "knockouts": cast(Any, record.knockouts_json) or [],
     }
+
+
+def _extract_with_retry(
+    llm: LLMClient,
+    prompt: str,
+    attempts: int = 2,
+) -> ATSExtraction:
+    """Llama al LLM y valida la salida, con un único reintento."""
+    last_error: Exception | None = None
+
+    for _ in range(attempts):
+        try:
+            result = llm.complete_json(
+                system=EXTRACTION_SYSTEM_PROMPT,
+                user=prompt,
+                schema=ATSExtraction,
+                temperature=0.0,
+            )
+        except (ValueError, RuntimeError) as exc:
+            last_error = exc
+            continue
+
+        if isinstance(result, ATSExtraction):
+            return result
+        last_error = TypeError(f"Se esperaba ATSExtraction, se obtuvo {type(result)}")
+
+    raise RuntimeError(
+        f"La extracción de requisitos falló tras {attempts} intentos: {last_error}"
+    )
+
+
+def _default_llm() -> LLMClient:
+    """Crea el cliente LLM a partir de ``config.yaml``."""
+    from jobradar.config import load_config
+    from jobradar.llm.factory import create_llm_client
+
+    config = load_config()
+    return create_llm_client(
+        provider=config.llm.provider,
+        model=config.llm.model_scoring,
+    )
+

@@ -1,8 +1,6 @@
 """Generación de CV adaptado + mensaje con validador determinista."""
 
-import hashlib
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,7 +10,9 @@ from pydantic import BaseModel
 from jobradar.config import load_config
 from jobradar.db.models import Application, Job
 from jobradar.db.session import get_engine, get_session_factory, init_db
+from jobradar.llm.base import LLMClient
 from jobradar.llm.factory import create_llm_client
+from jobradar.paths import prompt_path
 
 
 class TailoredExperience(BaseModel):
@@ -37,7 +37,14 @@ class TailoredCVOutput(BaseModel):
 
 CV_MASTER_PATH = Path("data/cv_master.yaml")
 PROMPT_VERSION = "tailoring_v1"
-PROMPT_PATH = Path("prompts/tailoring_v1.md")
+PROMPT_PATH = prompt_path("tailoring_v1.md")
+
+
+def _load_prompt() -> str:
+    """Carga la plantilla del prompt de tailoring desde el paquete."""
+    if not PROMPT_PATH.exists():
+        raise FileNotFoundError(f"No se encontró {PROMPT_PATH}")
+    return PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _load_cv_master(cv_master_path: str = str(CV_MASTER_PATH)) -> dict[str, Any]:
@@ -265,6 +272,8 @@ def tailor_job(
     knockouts: list[dict],
     provider: str | None = None,
     model: str | None = None,
+    llm: LLMClient | None = None,
+    language: str = "es",
 ) -> dict:
     """Genera CV adaptado + mensaje para una vacante.
 
@@ -272,8 +281,10 @@ def tailor_job(
         job_id: ID de la vacante en la BD.
         keywords_supported: Lista de keywords supported con evidencia (del LLM extract + matching).
         knockouts: Lista de knockouts con estado met/not_met/unknown.
-        provider: Proveedor LLM (nvidia | ollama | anthropic).
-        model: Nombre del modelo.
+        provider: Proveedor LLM (nvidia | ollama | anthropic) si no se inyecta cliente.
+        model: Nombre del modelo si no se inyecta cliente.
+        llm: Cliente LLM ya construido (inyectable en tests y en la UI).
+        language: Idioma de la vacante (``es`` | ``en``) para el CV y el mensaje.
 
     Returns:
         dict con resultado de la operación.
@@ -283,15 +294,14 @@ def tailor_job(
     init_db(engine)
     session_factory = get_session_factory(engine)
 
-    # Crear cliente LLM
-    llm = create_llm_client(
+    # Usar el cliente inyectado o construir uno desde config.yaml
+    client: LLMClient = llm or create_llm_client(
         provider=provider or config.llm.provider,
         model=model or config.llm.model_writing,
     )
 
     # Cargar prompt
-    with open(PROMPT_PATH, encoding="utf-8") as f:
-        prompt_template = f.read()
+    prompt_template = _load_prompt()
 
     # Construir entrada para el LLM (SOLO keywords supported, NUNCA gap)
     keywords_text = "\n".join(
@@ -300,17 +310,35 @@ def tailor_job(
     )
 
     user_prompt = prompt_template.replace("{{keywords_supported}}", keywords_text)
+
+    # Knockouts obligatorios no cumplidos: restricciones explícitas para el LLM
+    unmet = [
+        ko for ko in knockouts
+        if ko.get("mandatory") and ko.get("status") == "not_met"
+    ]
+    if unmet:
+        warnings = "; ".join(
+            str(ko.get("requirement") or ko.get("type") or "requisito")
+            for ko in unmet
+        )
+        user_prompt += (
+            "\n\nRESTRICCIONES: no reclames ni insinúes estos requisitos no "
+            f"cumplidos: {warnings}."
+        )
+
     system_prompt = (
         "Eres un experto en redacción de CV para ATS. "
         "Genera un CV adaptado usando SOLO los keywords soportados proporcionados. "
-        "No inventes experiencia. Responde siempre en JSON válido."
+        "No inventes experiencia. "
+        f"Redacta el CV y el mensaje de postulación en el idioma de la vacante: {language}. "
+        "Responde siempre en JSON válido."
     )
 
     # Intentar con reintento si coverage bajo
     max_attempts = 2
     for attempt in range(max_attempts):
         try:
-            result = llm.complete_json(
+            result = client.complete_json(
                 system=system_prompt,
                 user=user_prompt,
                 schema=TailoredCVOutput,
@@ -347,17 +375,13 @@ def tailor_job(
             if job is None:
                 return {"exito": False, "error": f"Vacante {job_id} no encontrada"}
 
-            hashlib.sha256(
-                (result.model_dump_json() + str(datetime.now(UTC))).encode()
-            ).hexdigest()[:16]
-
             application = Application(
                 job_id=job_id,
                 tailored_cv_json=result.model_dump(),
                 pdf_path="",
                 docx_path="",
                 message_text=result.cover_message,
-                language="es",
+                language=language,
                 required_coverage=coverage["required_coverage"],
                 ats_report_json={},
             )

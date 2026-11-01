@@ -8,13 +8,14 @@ from dotenv import load_dotenv
 from rich.console import Console
 
 from jobradar.ats_check import ats_report_all_passed, generate_ats_report, save_ats_report
-from jobradar.ats_keywords import extract_requirements, match_keywords
+from jobradar.ats_keywords import ensure_requirements, match_keywords
 from jobradar.company_discovery import CompanyDiscoveryClient
-from jobradar.config import CompanyConfig, load_config
+from jobradar.config import CompanyConfig, Settings, load_config
 from jobradar.db.models import Application, Event, Job, JobStatus
 from jobradar.db.session import get_engine, get_session_factory, init_db
 from jobradar.ingest import ingest_companies, probe_company
 from jobradar.knockouts import check_knockouts
+from jobradar.llm.factory import create_llm_client
 from jobradar.render.docx import generate_docx
 from jobradar.render.pdf import generate_pdf
 from jobradar.scoring import score_pending
@@ -33,6 +34,14 @@ def _get_session():
     engine = get_engine()
     init_db(engine)
     return get_session_factory(engine)
+
+
+def _build_llm(config: Settings):
+    """Crea el cliente LLM con el proveedor y modelo de config.yaml."""
+    return create_llm_client(
+        provider=config.llm.provider,
+        model=config.llm.model_scoring,
+    )
 
 
 @app.command()
@@ -74,7 +83,17 @@ def ingest():
 
 
 @app.command()
-def score(limit: int = typer.Option(20, "--limit", "-l", help="Máximo de vacantes a puntuar")):
+def score(
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        "-l",
+        help=(
+            "Máximo de vacantes a puntuar. Si se omite se usa "
+            "llm.max_jobs_per_run; un valor mayor se recorta a ese tope."
+        ),
+    ),
+):
     """Punta la compatibilidad de vacantes pendientes contra el CV maestro."""
     if not CV_MASTER_PATH.exists():
         console.print(f"[red]ERROR:[/red] No se encontró {CV_MASTER_PATH}. Crea tu CV maestro primero.")
@@ -93,6 +112,7 @@ def score(limit: int = typer.Option(20, "--limit", "-l", help="Máximo de vacant
         raise typer.Exit(1) from e
 
     console.print("\n[bold]Scoring completado:[/bold]")
+    console.print(f"  Límite aplicado: {result.get('limit', '?')}")
     console.print(f"  Vacantes evaluadas: {result['scored']}")
     console.print(f"  En caché (omitidas): {result['cached']}")
     console.print(f"  Errores: {result['errors']}")
@@ -100,13 +120,16 @@ def score(limit: int = typer.Option(20, "--limit", "-l", help="Máximo de vacant
 
 
 @app.command()
-def requirements(job_id: int):
+def requirements(
+    job_id: int = typer.Option(..., "--job-id", help="ID de la vacante"),
+):
     """Muestra keywords (supported/gap) y knockouts de una vacante."""
     if not CV_MASTER_PATH.exists():
         console.print(f"[red]ERROR:[/red] No se encontró {CV_MASTER_PATH}. Crea tu CV maestro primero.")
         raise typer.Exit(1)
 
     session_factory = _get_session()
+    config = load_config()
 
     with session_factory() as session:
         job = session.get(Job, job_id)
@@ -119,8 +142,13 @@ def requirements(job_id: int):
         console.print(f"Fuente: {job.source}")
         console.print(f"URL: {job.url}\n")
 
-        # Extraer requisitos de la descripción (LLM)
-        extraction = extract_requirements(job.description_text)
+        # Extraer requisitos de la descripción (LLM, cacheado por hash)
+        try:
+            extraction = ensure_requirements(job, session_factory, _build_llm(config))
+        except (RuntimeError, ValueError) as exc:
+            console.print(f"[red]ERROR:[/red] {exc}")
+            raise typer.Exit(1) from exc
+
         keywords = extraction.get("keywords", [])
         knockouts = extraction.get("knockouts", [])
 
@@ -173,13 +201,16 @@ def requirements(job_id: int):
 
 
 @app.command()
-def tailor(job_id: int):
+def tailor(
+    job_id: int = typer.Option(..., "--job-id", help="ID de la vacante"),
+):
     """Genera CV adaptado + mensaje para una vacante."""
     if not CV_MASTER_PATH.exists():
         console.print(f"[red]ERROR:[/red] No se encontró {CV_MASTER_PATH}. Crea tu CV maestro primero.")
         raise typer.Exit(1)
 
     session_factory = _get_session()
+    config = load_config()
 
     with session_factory() as session:
         job = session.get(Job, job_id)
@@ -189,8 +220,13 @@ def tailor(job_id: int):
 
         console.print(f"\n[bold]Generando CV para vacante #{job_id}: {job.title}[/bold]")
 
-        # Extraer requisitos de la descripción (LLM)
-        extraction = extract_requirements(job.description_text)
+        # Extraer requisitos de la descripción (LLM, cacheado por hash)
+        try:
+            extraction = ensure_requirements(job, session_factory, _build_llm(config))
+        except (RuntimeError, ValueError) as exc:
+            console.print(f"[red]ERROR:[/red] {exc}")
+            raise typer.Exit(1) from exc
+
         keywords = extraction.get("keywords", [])
         knockouts = extraction.get("knockouts", [])
 
@@ -313,7 +349,9 @@ def mark_applied(job_id: int):
 
 
 @app.command()
-def ats_check(job_id: int):
+def ats_check(
+    job_id: int = typer.Option(..., "--job-id", help="ID de la vacante"),
+):
     """Verifica el PDF/DOCX generado contra checklist ATS."""
     if not CV_MASTER_PATH.exists():
         console.print(f"[red]ERROR:[/red] No se encontró {CV_MASTER_PATH}. Crea tu CV maestro primero.")
@@ -409,11 +447,15 @@ def discover(query: str, limit: int = typer.Option(10, "--limit", "-l", help="M�
     y muestra los slugs encontrados para que el usuario decida cuáles añadir
     a config.yaml. Nunca añade empresas automáticamente.
     """
+    config = load_config()
     console.print(f"\n[bold]Buscando empresas:[/bold] {query}")
-    console.print(f"Límite de resultados: {limit}\n")
+    console.print(
+        f"Proveedor: {config.discovery.provider} | Límite: {limit} resultados "
+        f"(máx. {config.discovery.max_queries_per_run} consultas por corrida)\n"
+    )
 
     try:
-        client = CompanyDiscoveryClient()
+        client = CompanyDiscoveryClient(config=config.discovery)
         results = client.discover_companies(query, limit)
     except ValueError as e:
         console.print(f"[red]ERROR:[/red] {e}")

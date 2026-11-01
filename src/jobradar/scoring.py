@@ -13,11 +13,12 @@ from jobradar.db.models import Job, Score
 from jobradar.db.session import get_engine, get_session_factory, init_db
 from jobradar.llm.base import LLMClient
 from jobradar.llm.factory import create_llm_client
+from jobradar.paths import prompt_path
 
 PROMPT_VERSION = "scoring_v1"
 console = Console()
 CV_MASTER_PATH = Path("data/cv_master.yaml")
-PROMPT_PATH = Path("prompts/scoring_v1.md")
+PROMPT_PATH = prompt_path("scoring_v1.md")
 
 
 class ScoreOutput(BaseModel):
@@ -122,20 +123,44 @@ def score_job(
     return "scored"
 
 
+def resolve_run_limit(limit: int | None, configured: int) -> int:
+    """Aplica el tope configurable de vacantes por corrida (AGENTS.md §8.4).
+
+    Args:
+        limit: Valor pedido por el usuario; ``None`` usa el configurado.
+        configured: ``llm.max_jobs_per_run`` leído de ``config.yaml``.
+
+    Returns:
+        Cantidad efectiva, nunca negativa ni mayor que ``configured``.
+    """
+    if limit is None:
+        return max(0, configured)
+    return max(0, min(limit, configured))
+
+
 def score_pending(
-    limit: int = 20,
+    limit: int | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> dict:
     """Punta todas las vacantes pendientes sin score.
 
+    Args:
+        limit: Máximo de vacantes a procesar. Si es ``None`` o supera
+            ``llm.max_jobs_per_run``, se aplica el tope configurado.
+        provider: Proveedor LLM; por defecto el de ``config.yaml``.
+        model: Modelo LLM; por defecto el de ``config.yaml``.
+
     Returns:
-        Dict con contadores: scored, cached, errors, total.
+        Dict con contadores: scored, cached, errors, total, limit.
     """
     config = load_config()
     engine = get_engine()
     init_db(engine)
     session_factory = get_session_factory(engine)
+
+    # Resolver límite de ejecución (tope configurable, AGENTS.md §8.4)
+    resolved = resolve_run_limit(limit, config.llm.max_jobs_per_run)
 
     # Crear cliente LLM
     llm = create_llm_client(
@@ -165,7 +190,7 @@ def score_pending(
                     .exists()
                 )
             )
-            .limit(limit)
+            .limit(resolved)
         )
         jobs = session.scalars(stmt).all()
 
@@ -190,4 +215,6 @@ def score_pending(
         "cached": cached,
         "errors": errors,
         "total": len(jobs),
+        "limit": resolved,
     }
+
