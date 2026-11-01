@@ -1,21 +1,20 @@
 """Tests del cliente de descubrimiento de empresas (Fase 7).
 
-Todos los tests mockean HTTP: no hay llamadas de red reales.
+El HTTP vive en los proveedores; acá se mockea el transporte de Brave para no
+tocar la red. Los tests específicos de cada proveedor están en
+``tests/test_discovery_providers.py``.
 """
 
 from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 
-from jobradar.company_discovery import (
-    BRAVE_SEARCH_API_URL,
-    CompanyDiscoveryClient,
-    discover_companies,
-)
+from jobradar.company_discovery import CompanyDiscoveryClient, discover_companies
 from jobradar.config import DiscoveryConfig
+from jobradar.discovery.base import SearchHit
+from jobradar.discovery.brave import BRAVE_SEARCH_API_URL
 
 
 def _make_response(payload: dict[str, Any]) -> MagicMock:
@@ -40,66 +39,48 @@ def _payload(*urls: str) -> dict[str, Any]:
 
 @pytest.fixture
 def client() -> CompanyDiscoveryClient:
-    """Cliente con API key de prueba y sin límite de consultas estricto."""
+    """Cliente Brave con API key de prueba y límite de consultas holgado."""
     return CompanyDiscoveryClient(
         api_key="test_key_123",
-        config=DiscoveryConfig(max_queries_per_run=10, cache_ttl_hours=24),
+        config=DiscoveryConfig(
+            provider="brave", max_queries_per_run=10, cache_ttl_hours=24
+        ),
     )
-
-
-def test_init_with_api_key(client: CompanyDiscoveryClient) -> None:
-    """El cliente se inicializa con la API key recibida."""
-    assert client.api_key == "test_key_123"
-    assert client.headers["X-Subscription-Token"] == "test_key_123"
 
 
 def test_init_without_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Sin BRAVE_SEARCH_API_KEY se lanza ValueError con mensaje accionable."""
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     with pytest.raises(ValueError, match="BRAVE_SEARCH_API_KEY"):
-        CompanyDiscoveryClient()
+        CompanyDiscoveryClient(config=DiscoveryConfig(provider="brave"))
 
 
-def test_rate_limit_waits_between_requests(
-    client: CompanyDiscoveryClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """El rate limit duerme lo que falta para completar un segundo."""
-    clock = {"now": 100.0}
-    sleeps: list[float] = []
-
-    monkeypatch.setattr(
-        "jobradar.company_discovery.time.monotonic", lambda: clock["now"]
-    )
-    monkeypatch.setattr(
-        "jobradar.company_discovery.time.sleep", lambda seconds: sleeps.append(seconds)
-    )
-
-    client._last_request = 100.0
-    clock["now"] = 100.25
-    client._rate_limit()
-
-    assert sleeps == [pytest.approx(0.75)]
+def test_provider_name_is_exposed(client: CompanyDiscoveryClient) -> None:
+    """El cliente informa qué proveedor está usando."""
+    assert client.provider_name == "brave"
 
 
-def test_rate_limit_does_not_wait_when_enough_time_passed(
-    client: CompanyDiscoveryClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Si pasó más de un segundo, no duerme."""
-    clock = {"now": 200.0}
-    sleeps: list[float] = []
+def test_injected_provider_is_used() -> None:
+    """Se puede inyectar un proveedor propio (tests y futuros backends)."""
 
-    monkeypatch.setattr(
-        "jobradar.company_discovery.time.monotonic", lambda: clock["now"]
-    )
-    monkeypatch.setattr(
-        "jobradar.company_discovery.time.sleep", lambda seconds: sleeps.append(seconds)
-    )
+    class FakeProvider:
+        name = "fake"
 
-    client._last_request = 100.0
-    clock["now"] = 200.0
-    client._rate_limit()
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, int]] = []
 
-    assert sleeps == []
+        def search(self, query: str, max_results: int) -> list[SearchHit]:
+            self.queries.append((query, max_results))
+            return [SearchHit(url="https://jobs.lever.co/acme", title="Acme")]
+
+    provider = FakeProvider()
+    client = CompanyDiscoveryClient(provider=provider)
+
+    results = client.discover_companies("cualquiera", 5)
+
+    assert client.provider_name == "fake"
+    assert provider.queries == [("cualquiera", 5)]
+    assert results[0]["slug"] == "acme"
 
 
 def test_extract_greenhouse_slug_from_boards(client: CompanyDiscoveryClient) -> None:
@@ -182,7 +163,7 @@ def test_discover_companies_parses_and_dedupes(
         "https://example.com/no-es-portal",
     )
 
-    with patch("jobradar.company_discovery.httpx.Client") as client_class:
+    with patch("jobradar.discovery.brave.httpx.Client") as client_class:
         http_client = MagicMock()
         client_class.return_value.__enter__.return_value = http_client
         http_client.get.return_value = _make_response(payload)
@@ -203,7 +184,7 @@ def test_discover_companies_uses_cache(
     """La segunda consulta idéntica sale de caché y no golpea HTTP."""
     payload = _payload("https://jobs.lever.co/globex")
 
-    with patch("jobradar.company_discovery.httpx.Client") as client_class:
+    with patch("jobradar.discovery.brave.httpx.Client") as client_class:
         http_client = MagicMock()
         client_class.return_value.__enter__.return_value = http_client
         http_client.get.return_value = _make_response(payload)
@@ -233,7 +214,7 @@ def test_cache_expires_after_ttl(client: CompanyDiscoveryClient) -> None:
         ],
     )
 
-    with patch("jobradar.company_discovery.httpx.Client") as client_class:
+    with patch("jobradar.discovery.brave.httpx.Client") as client_class:
         http_client = MagicMock()
         client_class.return_value.__enter__.return_value = http_client
         http_client.get.return_value = _make_response(payload)
@@ -248,11 +229,11 @@ def test_discover_companies_enforces_max_queries_per_run() -> None:
     """Superar max_queries_per_run lanza RuntimeError."""
     limited = CompanyDiscoveryClient(
         api_key="test_key",
-        config=DiscoveryConfig(max_queries_per_run=1),
+        config=DiscoveryConfig(provider="brave", max_queries_per_run=1),
     )
     payload = _payload("https://jobs.lever.co/globex")
 
-    with patch("jobradar.company_discovery.httpx.Client") as client_class:
+    with patch("jobradar.discovery.brave.httpx.Client") as client_class:
         http_client = MagicMock()
         client_class.return_value.__enter__.return_value = http_client
         http_client.get.return_value = _make_response(payload)
@@ -276,7 +257,9 @@ def test_discover_companies_wraps_http_errors(
     client: CompanyDiscoveryClient,
 ) -> None:
     """Un fallo de red se propaga como RuntimeError."""
-    with patch("jobradar.company_discovery.httpx.Client") as client_class:
+    import httpx
+
+    with patch("jobradar.discovery.brave.httpx.Client") as client_class:
         http_client = MagicMock()
         client_class.return_value.__enter__.return_value = http_client
         http_client.get.side_effect = httpx.ConnectError("boom")
@@ -292,8 +275,16 @@ def test_module_level_discover_companies_passes_max_results(
     captured: dict[str, Any] = {}
 
     class FakeClient:
-        def __init__(self, api_key: str | None = None) -> None:
+        def __init__(
+            self,
+            api_key: str | None = None,
+            config: DiscoveryConfig | None = None,
+            provider: Any = None,
+        ) -> None:
             captured["api_key"] = api_key
+            captured["provider_config"] = (
+                config.provider if config is not None else None
+            )
 
         def discover_companies(
             self, query: str, max_results: int = 10
@@ -307,4 +298,6 @@ def test_module_level_discover_companies_passes_max_results(
     )
 
     assert discover_companies("buscar", max_results=3, api_key="k") == []
-    assert captured == {"api_key": "k", "query": "buscar", "max_results": 3}
+    assert captured["api_key"] == "k"
+    assert captured["query"] == "buscar"
+    assert captured["max_results"] == 3

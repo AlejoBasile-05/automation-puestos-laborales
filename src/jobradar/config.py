@@ -39,6 +39,7 @@ class ATSConfig(BaseModel):
 
 class DiscoveryConfig(BaseModel):
     """Configuración del descubrimiento de empresas (Fase 7)."""
+    provider: str = "brave"  # brave | google_cse
     max_queries_per_run: int = 5
     cache_ttl_hours: int = 24
 

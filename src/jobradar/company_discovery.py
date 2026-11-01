@@ -1,28 +1,24 @@
 """Descubrimiento de empresas de reclutamiento (Fase 7).
 
-Usa la Brave Search API para localizar portales de Greenhouse, Lever y Workday
-y extraer sus slugs. Los resultados se presentan al usuario para que decida
-cuáles añadir a ``config.yaml``; nunca se modifican automáticamente.
+Orquesta un proveedor de búsqueda (Brave o Google CSE), extrae los slugs de los
+portales de reclutamiento y los deduplica. Los resultados solo se presentan al
+usuario; nunca se escriben en ``config.yaml``.
 
 Referencia: PLAN.md Fase 7, AGENTS.md secciones 2, 5 y 11.
 """
 
 from __future__ import annotations
 
-import os
 import re
-import time
 from datetime import datetime
-from typing import Any
 
-import httpx
 from dotenv import load_dotenv
 
 from jobradar.config import DiscoveryConfig
+from jobradar.discovery.base import SearchHit, SearchProvider
+from jobradar.discovery.factory import create_search_provider
 
 load_dotenv()  # Carga variables de entorno desde .env
-
-BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/web/search"
 
 # job-boards debe evaluarse antes que boards: la primera cadena contiene a la segunda.
 _JOB_BOARDS_PATTERN = re.compile(r"job-boards\.greenhouse\.io/([^/?#&\s]+)")
@@ -40,9 +36,9 @@ _NON_SLUG_SEGMENTS = frozenset({"jobs", "jobs.json", "embed", "robots.txt"})
 
 
 class CompanyDiscoveryClient:
-    """Descubre empresas de reclutamiento mediante Brave Search API.
+    """Descubre empresas de reclutamiento usando un proveedor de búsqueda.
 
-    Extrae slugs de portales de reclutamiento de los resultados de búsqueda.
+    Extrae slugs de portales de reclutamiento de los resultados y los deduplica.
     Nunca añade empresas automáticamente: solo las presenta al usuario.
     """
 
@@ -50,31 +46,22 @@ class CompanyDiscoveryClient:
         self,
         api_key: str | None = None,
         config: DiscoveryConfig | None = None,
+        provider: SearchProvider | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("BRAVE_SEARCH_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "BRAVE_SEARCH_API_KEY no configurada. "
-                "Obtén una key gratuita en https://search.brave.com/ y añádela al .env"
-            )
         self.config = config or DiscoveryConfig()
-        self.headers = {
-            "Accept": "application/json",
-            "X-Subscription-Token": self.api_key,
-        }
+        self._provider = (
+            provider
+            if provider is not None
+            else create_search_provider(self.config.provider, api_key=api_key)
+        )
         # clave -> (momento de la consulta, resultados)
         self._cache: dict[tuple[str, int], tuple[datetime, list[dict[str, str]]]] = {}
-        self._last_request: float = 0.0
-        self._min_interval: float = 1.0  # 1 req/s
         self._queries_made: int = 0
 
-    def _rate_limit(self) -> None:
-        """Espera lo necesario para no superar 1 request por segundo."""
-        now = time.monotonic()
-        elapsed = now - self._last_request
-        if elapsed < self._min_interval:
-            time.sleep(self._min_interval - elapsed)
-        self._last_request = time.monotonic()
+    @property
+    def provider_name(self) -> str:
+        """Nombre del proveedor de búsqueda activo."""
+        return self._provider.name
 
     def _cache_is_fresh(self, cached_at: datetime) -> bool:
         """Indica si una entrada de caché sigue vigente."""
@@ -84,7 +71,7 @@ class CompanyDiscoveryClient:
     def discover_companies(
         self, query: str, max_results: int = 10
     ) -> list[dict[str, str]]:
-        """Busca empresas de reclutamiento mediante la API de búsqueda.
+        """Busca empresas de reclutamiento mediante el proveedor activo.
 
         Args:
             query: Consulta, por ejemplo
@@ -96,9 +83,9 @@ class CompanyDiscoveryClient:
             ``company_name``, ``url``, ``source_url`` y ``description``.
 
         Raises:
-            ValueError: si la consulta está vacía.
+            ValueError: si la consulta está vacía o falta una credencial.
             RuntimeError: si se supera el límite de consultas por corrida o si
-                la API responde con un error.
+                el proveedor falla.
         """
         clean_query = query.strip()
         if not clean_query:
@@ -116,35 +103,20 @@ class CompanyDiscoveryClient:
                 "(discovery.max_queries_per_run en config.yaml)"
             )
 
-        self._rate_limit()
         self._queries_made += 1
+        hits = self._provider.search(clean_query, max_results)
 
-        params: dict[str, str | int] = {"q": clean_query, "count": max_results}
-
-        try:
-            with httpx.Client(timeout=httpx.Timeout(20.0)) as client:
-                response = client.get(
-                    BRAVE_SEARCH_API_URL,
-                    params=params,
-                    headers=self.headers,
-                )
-                response.raise_for_status()
-                data: dict[str, Any] = response.json()
-        except httpx.HTTPError as exc:
-            raise RuntimeError(f"Error llamando a Brave Search API: {exc}") from exc
-
-        discovered = self._parse_results(data.get("web", {}).get("results", []))
+        discovered = self._parse_results(hits)
         self._cache[cache_key] = (datetime.now(), discovered)
         return list(discovered[:max_results])
 
-    def _parse_results(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
+    def _parse_results(self, hits: list[SearchHit]) -> list[dict[str, str]]:
         """Convierte resultados de búsqueda en empresas candidatas deduplicadas."""
         discovered: list[dict[str, str]] = []
         seen: set[tuple[str, str]] = set()
 
-        for result in results:
-            url = str(result.get("url", ""))
-            extracted = self._extract_company_info(url)
+        for hit in hits:
+            extracted = self._extract_company_info(hit.url)
             if extracted is None:
                 continue
 
@@ -157,10 +129,10 @@ class CompanyDiscoveryClient:
                 {
                     "slug": extracted["slug"],
                     "source": extracted["source"],
-                    "company_name": str(result.get("title") or extracted["slug"]),
+                    "company_name": hit.title or extracted["slug"],
                     "url": extracted["url"],
-                    "source_url": url,
-                    "description": str(result.get("description") or ""),
+                    "source_url": hit.url,
+                    "description": hit.snippet,
                 }
             )
 
@@ -221,7 +193,8 @@ def discover_companies(
     query: str,
     max_results: int = 10,
     api_key: str | None = None,
+    config: DiscoveryConfig | None = None,
 ) -> list[dict[str, str]]:
     """Función de conveniencia: crea un cliente y busca empresas candidatas."""
-    client = CompanyDiscoveryClient(api_key=api_key)
+    client = CompanyDiscoveryClient(api_key=api_key, config=config)
     return client.discover_companies(query, max_results=max_results)

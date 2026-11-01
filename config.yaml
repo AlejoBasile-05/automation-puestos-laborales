@@ -40,6 +40,7 @@ ats:
   date_format: "MMM YYYY"
 
 discovery:
+  provider: "serper"        # serper | brave | google_cse
   max_queries_per_run: 5
   cache_ttl_hours: 24
 
