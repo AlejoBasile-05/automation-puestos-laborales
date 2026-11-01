@@ -18,6 +18,7 @@ from jobradar.db.models import (
     Event,
     Job,
     JobStatus,
+    Score,
     WorkplaceType,
 )
 
@@ -447,3 +448,86 @@ def test_run_ingest_uses_configured_companies(
 
     assert result.jobs_new == 7
     assert captured["session_factory"] is seeded
+
+
+# ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
+
+def test_get_scores_for_jobs_returns_latest_per_job(
+    seeded: sessionmaker[Session],
+) -> None:
+    """Devuelve el score más reciente de cada vacante en una sola consulta."""
+    base = _naive_now()
+    with seeded() as session:
+        job = session.query(Job).filter_by(external_id="gh-1").one()
+        job_id = job.id
+        session.add_all(
+            [
+                Score(
+                    job_id=job_id,
+                    cv_hash="viejo",
+                    prompt_version="scoring_v0",
+                    model="fake-model",
+                    score=40,
+                    verdict="quizá",
+                    matches_json=[],
+                    gaps_json=[],
+                    red_flags_json=[],
+                    created_at=base - timedelta(minutes=5),
+                ),
+                Score(
+                    job_id=job_id,
+                    cv_hash="nuevo",
+                    prompt_version="scoring_v1",
+                    model="fake-model",
+                    score=88,
+                    verdict="aplicar",
+                    matches_json=["Python"],
+                    gaps_json=["Go"],
+                    red_flags_json=["sin salario"],
+                    created_at=base,
+                ),
+            ]
+        )
+        session.commit()
+
+    result = dq.get_scores_for_jobs([job_id])
+
+    assert set(result) == {job_id}
+    assert result[job_id]["score"] == 88
+    assert result[job_id]["verdict"] == "aplicar"
+    assert result[job_id]["matches"] == ["Python"]
+    assert result[job_id]["gaps"] == ["Go"]
+    assert result[job_id]["red_flags"] == ["sin salario"]
+    assert result[job_id]["model"] == "fake-model"
+
+
+def test_get_scores_for_jobs_empty_input_returns_empty() -> None:
+    """Sin IDs no se consulta la base."""
+    assert dq.get_scores_for_jobs([]) == {}
+
+
+def test_run_scoring_delegates_with_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El wrapper del dashboard pasa el límite a score_pending."""
+    captured: dict[str, object] = {}
+
+    def fake_score_pending(limit: int | None = None) -> dict[str, object]:
+        captured["limit"] = limit
+        return {
+            "scored": 0,
+            "cached": 0,
+            "errors": 0,
+            "total": 0,
+            "limit": limit,
+        }
+
+    monkeypatch.setattr(dq, "score_pending", fake_score_pending)
+
+    result = dq.run_scoring(limit=3)
+
+    assert captured["limit"] == 3
+    assert result["limit"] == 3
