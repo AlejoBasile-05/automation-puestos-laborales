@@ -512,11 +512,15 @@ def test_get_scores_for_jobs_empty_input_returns_empty() -> None:
 def test_run_scoring_delegates_with_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """El wrapper del dashboard pasa el límite a score_pending."""
+    """El wrapper del dashboard pasa el límite y el callback a score_pending."""
     captured: dict[str, object] = {}
 
-    def fake_score_pending(limit: int | None = None) -> dict[str, object]:
+    def fake_score_pending(
+        limit: int | None = None,
+        on_progress: object = None,
+    ) -> dict[str, object]:
         captured["limit"] = limit
+        captured["on_progress"] = on_progress
         return {
             "scored": 0,
             "cached": 0,
@@ -527,9 +531,13 @@ def test_run_scoring_delegates_with_limit(
 
     monkeypatch.setattr(dq, "score_pending", fake_score_pending)
 
-    result = dq.run_scoring(limit=3)
+    def on_progress(done: int, total: int, title: str, result: str) -> None:
+        pass
+
+    result = dq.run_scoring(limit=3, on_progress=on_progress)
 
     assert captured["limit"] == 3
+    assert captured["on_progress"] is on_progress
     assert result["limit"] == 3
 
 

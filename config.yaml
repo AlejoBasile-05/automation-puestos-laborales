@@ -24,7 +24,7 @@ search:
 llm:
   provider: "nvidia"        # anthropic | ollama | nvidia
   model_scoring: "meta/llama-3.2-90b-vision-instruct"   # modelo gratuito de Nvidia NIM
-  model_writing: "deepseek-ai/deepseek-v4.1-flash"   # mismo modelo para redacción (gratuito)
+  model_writing: "meta/llama-3.2-90b-vision-instruct"   # deepseek-v4.1-flash cuelga >150 s en esta cuenta
   max_jobs_per_run: 10
   # Opcional: precio por 1.000 tokens para estimar costo en el dashboard (0 = sin precio).
   price_input_per_1k_usd: 0.0

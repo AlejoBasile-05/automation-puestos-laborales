@@ -28,7 +28,7 @@ from jobradar.db.models import (
 )
 from jobradar.db.session import get_engine, get_session_factory, init_db
 from jobradar.ingest import IngestSummary, ingest_companies
-from jobradar.scoring import estimate_scoring_run, score_pending
+from jobradar.scoring import ProgressCallback, estimate_scoring_run, score_pending
 
 LAST_VISIT_FILE = Path("data/last_visit.json")
 
@@ -203,9 +203,12 @@ def get_scores_for_jobs(job_ids: list[int]) -> dict[int, dict[str, Any]]:
     return latest
 
 
-def run_scoring(limit: int | None = None) -> dict[str, Any]:
+def run_scoring(
+    limit: int | None = None,
+    on_progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
     """Puntúa vacantes pendientes respetando ``llm.max_jobs_per_run``."""
-    return score_pending(limit=limit)
+    return score_pending(limit=limit, on_progress=on_progress)
 
 
 def run_cost_estimate(limit: int | None = None) -> dict[str, Any]:

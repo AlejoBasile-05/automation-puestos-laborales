@@ -25,12 +25,15 @@ class NvidiaClient(LLMClient):
         api_key: str,
         model: str = "nvidia/nemotron-mini-4b-instruct",
         base_url: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: int | None = None,
     ):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url or self.BASE_URL
-        self._timeout = timeout_seconds
+        # Los modelos gratuitos de NIM pueden tardar 20-60 s por respuesta.
+        self._timeout = timeout_seconds or int(
+            os.getenv("NVIDIA_TIMEOUT_SECONDS", "120")
+        )
 
     @property
     def model_name(self) -> str:

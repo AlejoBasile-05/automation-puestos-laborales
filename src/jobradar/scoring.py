@@ -1,6 +1,7 @@
 """Scoring de compatibilidad con LLM."""
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ OUTPUT_TOKENS_PER_JOB = 500
 console = Console()
 CV_MASTER_PATH = Path("data/cv_master.yaml")
 PROMPT_PATH = prompt_path("scoring_v1.md")
+
+# (procesadas, total, título, resultado: scored | cached | error)
+ProgressCallback = Callable[[int, int, str, str], None]
 
 
 class ScoreOutput(BaseModel):
@@ -245,6 +249,7 @@ def score_pending(
     limit: int | None = None,
     provider: str | None = None,
     model: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> dict:
     """Punta todas las vacantes pendientes sin score.
 
@@ -253,9 +258,12 @@ def score_pending(
             ``llm.max_jobs_per_run``, se aplica el tope configurado.
         provider: Proveedor LLM; por defecto el de ``config.yaml``.
         model: Modelo LLM; por defecto el de ``config.yaml``.
+        on_progress: Callback opcional ``(procesadas, total, título, resultado)``
+            invocado después de cada vacante (útil para barras de progreso).
 
     Returns:
-        Dict con contadores: scored, cached, errors, total, limit.
+        Dict con contadores: scored, cached, errors, total, limit y
+        errors_detail (mensajes de los errores).
     """
     config = load_config()
     engine = get_engine()
@@ -300,24 +308,34 @@ def score_pending(
     scored = 0
     cached = 0
     errors = 0
+    errors_detail: list[str] = []
+    total = len(jobs)
 
-    for job in jobs:
+    for index, job in enumerate(jobs, start=1):
+        company_name = job.company.name if job.company else "?"
+        result = "error"
         try:
             result = score_job(job, cv_hash, PROMPT_VERSION, llm, session_factory)
             if result == "cached":
                 cached += 1
             else:
                 scored += 1
-            console.print(f"  [{scored + cached}/{len(jobs)}] {job.title} (@{job.company.name}) - {result}")
+            console.print(f"  [{scored + cached}/{total}] {job.title} (@{company_name}) - {result}")
         except Exception as e:
             errors += 1
-            console.print(f"  [red]ERROR:[/red] {job.title} (@{job.company.name}): {e}")
+            message = f"{job.title} (@{company_name}): {e}"
+            errors_detail.append(message)
+            console.print(f"  [red]ERROR:[/red] {message}")
+        finally:
+            if on_progress is not None:
+                on_progress(index, total, job.title, result)
 
     return {
         "scored": scored,
         "cached": cached,
         "errors": errors,
-        "total": len(jobs),
+        "total": total,
         "limit": resolved,
+        "errors_detail": errors_detail,
     }
 

@@ -131,19 +131,43 @@ if page == "Vacantes":
 
     st.title("Vacantes")
 
+    try:
+        estimate = run_cost_estimate()
+        st.caption(
+            f"Pendientes: {estimate['pending']} · esta corrida procesa hasta "
+            f"{estimate['to_run']} (tope {estimate['limit']}). Cada vacante puede "
+            "tardar entre 15 y 60 s con el modelo configurado."
+        )
+    except FileNotFoundError:
+        st.caption("Falta data/cv_master.yaml para estimar la corrida.")
+
     if st.button("Puntuar pendientes", key="score-pending"):
-        with st.spinner("Puntuando vacantes pendientes..."):
-            st.session_state.score_summary = run_scoring()
+        progress = st.progress(0.0, text="Iniciando scoring...")
+
+        def _on_progress(done: int, total: int, title: str, result: str) -> None:
+            progress.progress(
+                min(done / total, 1.0) if total else 1.0,
+                text=f"{done}/{total} · {title} · {result}",
+            )
+
+        st.session_state.score_summary = run_scoring(on_progress=_on_progress)
         st.rerun()
 
     if "score_summary" in st.session_state:
         score_summary = st.session_state.score_summary
-        st.success(
-            f"Scoring completado: {score_summary['scored']} puntuadas, "
-            f"{score_summary['cached']} en caché, "
-            f"{score_summary['errors']} errores "
-            f"(límite {score_summary.get('limit', '?')})."
-        )
+        if score_summary["total"] == 0:
+            st.info("No hay vacantes pendientes de puntuar.")
+        else:
+            st.success(
+                f"Scoring completado: {score_summary['scored']} puntuadas, "
+                f"{score_summary['cached']} en caché, "
+                f"{score_summary['errors']} errores "
+                f"(límite {score_summary.get('limit', '?')})."
+            )
+        if score_summary.get("errors_detail"):
+            with st.expander(f"Ver errores ({score_summary['errors']})"):
+                for message in score_summary["errors_detail"]:
+                    st.write(f"- {message}")
         del st.session_state.score_summary
 
     if not jobs:
