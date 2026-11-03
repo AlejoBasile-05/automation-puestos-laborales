@@ -117,11 +117,12 @@ La misma función está disponible en el dashboard, página **Descubrimiento**.
 
 El dashboard Streamlit proporciona una interfaz gráfica para:
 
-1. **Vacantes**: tabla con filtros (texto, empresa, fuente, ubicación/remoto, rango de fechas, estado, solo abiertas), columnas de **Puntaje** y **Veredicto**, botón **Puntuar pendientes** (con el mismo tope `llm.max_jobs_per_run`), detalle completo con coincidencias/brechas/alertas e historial de eventos.
-2. **Seguimiento**: conteo por estado, notas, fecha de postulación, recordatorios de postulaciones sin respuesta y exportación a CSV.
-3. **Preparar postulación**: CV adaptado, panel ATS, keywords cubiertas vs. brechas, knockouts y mensaje editable.
-4. **Configuración**: empresas, filtros y proveedor LLM en solo lectura (se editan en `config.yaml`).
-5. **Descubrimiento**: empresas candidatas vía el proveedor configurado, validadas con `probe` y con el bloque YAML listo para copiar.
+1. **Vacantes**: tabla con filtros (texto, empresa, fuente, ubicación/remoto, rango de fechas, estado, solo abiertas, **puntaje mínimo**) y **orden por fecha o puntaje**, columnas de **Puntaje** y **Veredicto**, botón **Puntuar pendientes** (con el mismo tope `llm.max_jobs_per_run`).
+2. **Detalle de vacante**: página dedicada con la descripción completa, puntaje con coincidencias/brechas/alertas, enlace original e historial de eventos.
+3. **Seguimiento**: conteo por estado, notas, fecha de postulación, recordatorios de postulaciones sin respuesta y exportación a CSV.
+4. **Preparar postulación**: CV adaptado, panel ATS, keywords cubiertas vs. brechas, knockouts y mensaje editable.
+5. **Configuración**: empresas, filtros y proveedor LLM en solo lectura (se editan en `config.yaml`), más una **estimación de tokens y costo** de la próxima corrida (el costo en USD solo aparece si definís `llm.price_input_per_1k_usd` / `llm.price_output_per_1k_usd`).
+6. **Descubrimiento**: empresas candidatas vía el proveedor configurado, validadas con `probe` y con el bloque YAML listo para copiar.
 
 Para acceder al dashboard, ejecuta:
 

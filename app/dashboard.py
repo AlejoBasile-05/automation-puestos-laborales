@@ -27,6 +27,7 @@ from jobradar.dashboard_queries import (
     mark_job_applied,
     mark_job_discarded,
     mark_job_reviewed,
+    run_cost_estimate,
     run_ingest,
     run_prepare_application,
     run_scoring,
@@ -57,7 +58,15 @@ def _normalize_ats_check(outcome: object) -> tuple[bool, str]:
 with st.sidebar:
     st.title("JobRadar")
     page = st.radio(
-        "Ir a", ["Vacantes", "Seguimiento", "Preparar postulación", "Configuración", "Descubrimiento"]
+        "Ir a",
+        [
+            "Vacantes",
+            "Detalle de vacante",
+            "Seguimiento",
+            "Preparar postulación",
+            "Configuración",
+            "Descubrimiento",
+        ],
     )
     st.divider()
 
@@ -74,6 +83,8 @@ with st.sidebar:
         date_to = st.date_input("Fecha hasta", value=None)
         status_filter = st.selectbox("Estado", STATUS_OPTIONS)
         only_open = st.checkbox("Solo abiertas", value=True)
+        min_score = st.slider("Puntaje mínimo", min_value=0, max_value=100, value=0, step=5)
+        sort_by = st.selectbox("Ordenar por", ["Recientes", "Puntaje"])
 
         if st.button("Aplicar filtros"):
             st.session_state.last_visit = datetime.now()
@@ -109,8 +120,13 @@ if page == "Vacantes":
         date_to=date_to,
         status=status_filter if status_filter != "Todos" else None,
         only_open=only_open,
+        min_score=min_score if min_score > 0 else None,
     )
-    jobs = get_filtered_jobs(filters, st.session_state.last_visit)
+    jobs = get_filtered_jobs(
+        filters,
+        st.session_state.last_visit,
+        sort="puntaje" if sort_by == "Puntaje" else "recientes",
+    )
     scores = get_scores_for_jobs([job.id for job in jobs])
 
     st.title("Vacantes")
@@ -232,6 +248,78 @@ if page == "Vacantes":
                         else:
                             st.success("Vacante marcada como aplicada")
                             st.rerun()
+
+# ---------------------------------------------------------------------------
+# Página: Detalle de vacante
+# ---------------------------------------------------------------------------
+elif page == "Detalle de vacante":
+    st.title("Detalle de vacante")
+
+    all_jobs = get_filtered_jobs(JobFilters(), sort="recientes")
+    if not all_jobs:
+        st.info("No hay vacantes cargadas todavía.")
+    else:
+        job_options = {
+            job.id: (
+                f"#{job.id} — {job.title} "
+                f"({job.company.name if job.company else 'N/A'})"
+            )
+            for job in all_jobs
+        }
+        selected_id = st.selectbox(
+            "Seleccionar vacante",
+            options=list(job_options),
+            format_func=lambda value: job_options[value],
+            key="detail_job_select",
+        )
+
+        job = get_job_details(selected_id)
+        if job is None:
+            st.warning("La vacante ya no existe en la base.")
+        else:
+            st.subheader(job.title)
+            st.write(
+                f"**Empresa:** {job.company.name if job.company else 'Desconocida'}"
+            )
+            st.write(f"**Fuente:** {job.source}")
+            st.write(f"**Ubicación:** {job.location or 'N/A'}")
+            st.write(f"**Estado:** {job.status}")
+            st.write(
+                f"**Fecha:** "
+                f"{job.posted_at.strftime('%Y-%m-%d') if job.posted_at else 'Desconocida'}"
+            )
+            if job.url:
+                st.link_button("Abrir enlace de la vacante", job.url)
+
+            st.subheader("Puntuación de compatibilidad")
+            score = get_scores_for_jobs([job.id]).get(job.id)
+            if score:
+                st.metric("Score", f"{score['score']}/100", score["verdict"])
+                for label, values in (
+                    ("Coincidencias", score["matches"]),
+                    ("Brechas", score["gaps"]),
+                    ("Alertas", score["red_flags"]),
+                ):
+                    if values:
+                        st.write(f"**{label}:**")
+                        for item in values:
+                            st.write(f"- {item}")
+            else:
+                st.caption("Sin puntaje todavía.")
+
+            st.subheader("Descripción")
+            st.write(job.description_text)
+
+            st.subheader("Historial de eventos")
+            events = get_job_events(job.id)
+            if events:
+                for event in events:
+                    st.write(
+                        f"- {event.created_at.strftime('%Y-%m-%d %H:%M')}: "
+                        f"{event.type} - {event.payload_json}"
+                    )
+            else:
+                st.write("No hay eventos registrados")
 
 # ---------------------------------------------------------------------------
 # Página: Seguimiento
@@ -522,6 +610,28 @@ elif page == "Configuración":
         "La configuración del LLM se lee de config.yaml y .env. Edita esos "
         "archivos para cambios permanentes."
     )
+
+    st.divider()
+    st.subheader("Estimación de costo")
+    try:
+        estimate = run_cost_estimate()
+    except FileNotFoundError:
+        st.warning("Falta data/cv_master.yaml para estimar la corrida.")
+    else:
+        st.write(f"**Vacantes pendientes:** {estimate['pending']}")
+        st.write(f"**Tope por corrida (max_jobs_per_run):** {estimate['limit']}")
+        st.write(f"**A procesar ahora:** {estimate['to_run']}")
+        st.write(
+            f"**Tokens estimados (entrada / salida):** "
+            f"{estimate['estimated_input_tokens']} / {estimate['estimated_output_tokens']}"
+        )
+        if estimate["prices_configured"]:
+            st.write(f"**Costo estimado:** US$ {estimate['estimated_cost_usd']}")
+        else:
+            st.caption(
+                "Definí `llm.price_input_per_1k_usd` y `llm.price_output_per_1k_usd` "
+                "en config.yaml para ver el costo en dólares."
+            )
 
 # ---------------------------------------------------------------------------
 # Página: Descubrimiento (Fase 7)

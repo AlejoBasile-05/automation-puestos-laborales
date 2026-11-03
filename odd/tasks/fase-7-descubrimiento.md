@@ -282,3 +282,19 @@ Verificación posterior a los commits: `uv run pytest -q` → `220 passed`;
 `review_due: false` (`under_budget`); no se inicia ciclo de revisión.
 
 
+
+L14 — Cierre de huecos de AGENTS.md §10 (2026-11-02). El usuario pidió seguir
+con los tres faltantes del dashboard: página de detalle dedicada, filtro/orden
+por puntaje y estimación de costo antes de puntuar.
+
+- S1 (detalle): nueva página "Detalle de vacante" con descripción, score
+  (matches/gaps/red_flags), enlace original e historial de eventos.
+- S2 (puntaje): `JobFilters.min_score` + `get_filtered_jobs(..., sort="recientes"|"puntaje")`;
+  el sidebar de Vacantes expone "Puntaje mínimo" y "Ordenar por".
+- S3 (costo): `estimate_scoring_run()` + `run_cost_estimate()`; Configuración
+  muestra pendientes, tope, tokens estimados y costo USD si hay precios.
+- `LLMConfig.price_input_per_1k_usd` / `price_output_per_1k_usd` (default 0.0).
+
+Evidencia: `uv run pytest -q` → `224 passed`; `ruff` limpio; `mypy src` limpio
+(35 archivos); AppTest 6/6 páginas OK; `estimate_scoring_run()` real →
+`{'pending': 1, 'limit': 10, 'to_run': 1, ...}`.
