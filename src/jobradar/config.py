@@ -50,7 +50,7 @@ class DiscoveryConfig(BaseModel):
 class CompanyConfig(BaseModel):
     """Configuración de una empresa objetivo."""
     name: str
-    source: str  # greenhouse | lever | workday
+    source: str  # greenhouse | lever | ashby | workday
     slug: str | None = None
     tenant: str | None = None
     wd: int | None = None

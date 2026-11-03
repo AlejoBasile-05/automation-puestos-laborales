@@ -9,7 +9,7 @@ from typing import Any
 @dataclass
 class NormalizedJob:
     """Vacante normalizada lista para persistir."""
-    source: str  # "greenhouse" | "lever" | "workday"
+    source: str  # "greenhouse" | "lever" | "ashby" | "workday"
     external_id: str
     company: str  # slug de la empresa
     company_name: str

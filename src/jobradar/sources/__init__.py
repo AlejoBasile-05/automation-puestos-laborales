@@ -1,11 +1,13 @@
 """Fuentes de vacantes - factory para obtener conectores."""
 
+from jobradar.sources.ashby import AshbySource
 from jobradar.sources.base import JobSource
 from jobradar.sources.greenhouse import GreenhouseSource
 from jobradar.sources.lever import LeverSource
 from jobradar.sources.workday import WorkdaySource
 
 _SOURCES: dict[str, type[JobSource]] = {
+    "ashby": AshbySource,
     "greenhouse": GreenhouseSource,
     "lever": LeverSource,
     "workday": WorkdaySource,

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from jobradar.sources import get_source, list_sources
+from jobradar.sources.ashby import AshbySource
 from jobradar.sources.base import NormalizedJob
 from jobradar.sources.greenhouse import GreenhouseSource
 from jobradar.sources.lever import LeverSource
@@ -25,6 +26,13 @@ def greenhouse_fixture():
 def lever_fixture():
     """Carga fixture de Lever (brafton)."""
     with open(FIXTURES_DIR / "lever_brafton.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def ashby_fixture():
+    """Carga fixture de Ashby (linear)."""
+    with open(FIXTURES_DIR / "ashby_linear.json", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -298,6 +306,110 @@ class TestLeverSource:
         assert "not found" in error.lower() or "404" in error
 
 
+class TestAshbySource:
+    """Tests para AshbySource."""
+
+    def test_normalize_first_job(self, ashby_fixture):
+        """Verifica normalización del primer job del fixture."""
+        source = AshbySource()
+        job = ashby_fixture["jobs"][0]
+        normalized = source._normalize_job(job, "linear", "Linear")
+
+        assert isinstance(normalized, NormalizedJob)
+        assert normalized.source == "ashby"
+        assert normalized.external_id == "d3bc1ced-3ce4-4086-a050-555055dbb1ff"
+        assert normalized.company == "linear"
+        assert normalized.company_name == "Linear"
+        assert normalized.title == "Senior / Staff Fullstack Engineer"
+        assert normalized.location == "Europe"
+        assert normalized.department == "Product"
+        assert normalized.workplace_type == "remote"
+        assert normalized.url.startswith("https://jobs.ashbyhq.com/linear/")
+        assert normalized.posted_at is not None
+        assert normalized.posted_at.year == 2021
+        assert normalized.posted_at.month == 4
+        assert normalized.posted_at.day == 27
+        # Usa descriptionPlain, sin HTML
+        assert normalized.description_text
+        assert "<p>" not in normalized.description_text
+        assert "<strong>" not in normalized.description_text
+
+    def test_workplace_type_mapping(self):
+        """Mapea workplaceType y cae a isRemote cuando falta."""
+        source = AshbySource()
+
+        assert source._get_workplace_type({"workplaceType": "Remote"}) == "remote"
+        assert source._get_workplace_type({"workplaceType": "Hybrid"}) == "hybrid"
+        assert source._get_workplace_type({"workplaceType": "Onsite"}) == "onsite"
+        assert source._get_workplace_type({"isRemote": True}) == "remote"
+        assert source._get_workplace_type({}) is None
+
+    def test_probe_success(self, ashby_fixture, monkeypatch):
+        """Test de probe exitoso (mock)."""
+        source = AshbySource()
+
+        class MockResponse:
+            def __init__(self, json_data, status_code=200):
+                self._json = json_data
+                self.status_code = status_code
+                self.headers = {}
+
+            def json(self):
+                return self._json
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise Exception(f"HTTP {self.status_code}")
+
+        class MockClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def get(self, url):
+                return MockResponse(ashby_fixture)
+
+        monkeypatch.setattr("jobradar.sources.ashby.HTTPClient", MockClient)
+
+        success, count, error = source.probe({"slug": "linear", "name": "Linear"})
+        assert success is True
+        assert count == 31
+        assert error is None
+
+    def test_probe_404(self, monkeypatch):
+        """Test de probe con 404."""
+        source = AshbySource()
+
+        class MockResponse:
+            status_code = 404
+            headers = {}
+
+            def json(self):
+                return {}
+
+            def raise_for_status(self):
+                raise Exception("404")
+
+        class MockClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def get(self, url):
+                return MockResponse()
+
+        monkeypatch.setattr("jobradar.sources.ashby.HTTPClient", MockClient)
+
+        success, count, error = source.probe({"slug": "nonexistent", "name": "Nonexistent"})
+        assert success is False
+        assert count == 0
+        assert "not found" in error.lower() or "404" in error
+
+
 class TestSourceFactory:
     """Tests para el factory de fuentes."""
 
@@ -310,6 +422,11 @@ class TestSourceFactory:
         """Obtiene conector Lever."""
         source = get_source("lever")
         assert isinstance(source, LeverSource)
+
+    def test_get_ashby_source(self):
+        """Obtiene conector Ashby."""
+        source = get_source("ashby")
+        assert isinstance(source, AshbySource)
 
     def test_get_source_case_insensitive(self):
         """Factory es case-insensitive."""
@@ -327,7 +444,8 @@ class TestSourceFactory:
         sources = list_sources()
         assert "greenhouse" in sources
         assert "lever" in sources
-        assert len(sources) >= 2
+        assert "ashby" in sources
+        assert len(sources) >= 3
 
 
 class TestNormalizedJob:
