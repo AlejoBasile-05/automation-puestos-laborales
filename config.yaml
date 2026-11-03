@@ -26,6 +26,9 @@ llm:
   model_scoring: "meta/llama-3.2-90b-vision-instruct"   # modelo gratuito de Nvidia NIM
   model_writing: "deepseek-ai/deepseek-v4.1-flash"   # mismo modelo para redacción (gratuito)
   max_jobs_per_run: 10
+  # Opcional: precio por 1.000 tokens para estimar costo en el dashboard (0 = sin precio).
+  price_input_per_1k_usd: 0.0
+  price_output_per_1k_usd: 0.0
 
 http:
   requests_per_second: 1

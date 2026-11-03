@@ -2,10 +2,11 @@
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 from rich.console import Console
-from sqlalchemy import select
+from sqlalchemy import and_, func, not_, select
 from sqlalchemy.orm import joinedload
 
 from jobradar.config import load_config
@@ -16,6 +17,7 @@ from jobradar.llm.factory import create_llm_client
 from jobradar.paths import prompt_path
 
 PROMPT_VERSION = "scoring_v1"
+OUTPUT_TOKENS_PER_JOB = 500
 console = Console()
 CV_MASTER_PATH = Path("data/cv_master.yaml")
 PROMPT_PATH = prompt_path("scoring_v1.md")
@@ -136,6 +138,107 @@ def resolve_run_limit(limit: int | None, configured: int) -> int:
     if limit is None:
         return max(0, configured)
     return max(0, min(limit, configured))
+
+
+def estimate_text_tokens(text: str) -> int:
+    """Estimación burda de tokens: ~4 caracteres por token."""
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def estimate_cost_usd(
+    input_tokens: int,
+    output_tokens: int,
+    price_input_per_1k: float,
+    price_output_per_1k: float,
+) -> float:
+    """Costo estimado en USD a partir del precio por 1.000 tokens."""
+    return (
+        (input_tokens / 1000) * price_input_per_1k
+        + (output_tokens / 1000) * price_output_per_1k
+    )
+
+
+def current_cv_hash() -> str:
+    """Hash SHA256 del CV maestro actual (o del vacío si no existe)."""
+    return _compute_cv_hash(_load_cv_master())
+
+
+def pending_jobs_stats(cv_hash: str | None = None) -> tuple[int, float]:
+    """Cuenta de vacantes pendientes y promedio de caracteres de su descripción.
+
+    "Pendiente" significa abierta y sin score para el ``(cv_hash,
+    prompt_version)`` actuales, igual que :func:`score_pending`.
+    """
+    engine = get_engine()
+    init_db(engine)
+    session_factory = get_session_factory(engine)
+    resolved_hash = cv_hash or current_cv_hash()
+
+    pending_filter = not_(
+        select(Score.id)
+        .where(
+            and_(
+                Score.job_id == Job.id,
+                Score.cv_hash == resolved_hash,
+                Score.prompt_version == PROMPT_VERSION,
+            )
+        )
+        .exists()
+    )
+
+    with session_factory() as session:
+        count = session.scalar(
+            select(func.count()).select_from(Job).where(Job.is_open).where(pending_filter)
+        )
+        if not count:
+            return 0, 0.0
+        total_chars = session.scalar(
+            select(func.coalesce(func.sum(func.length(Job.description_text)), 0))
+            .where(Job.is_open)
+            .where(pending_filter)
+        )
+    return int(count), float(total_chars or 0) / int(count)
+
+
+def estimate_scoring_run(limit: int | None = None) -> dict[str, Any]:
+    """Estima el volumen y costo de una corrida de scoring antes de ejecutarla.
+
+    El costo en USD solo se calcula si ``config.yaml`` define precios por 1.000
+    tokens en ``llm``; si no, se devuelve ``estimated_cost_usd = 0.0`` con
+    ``prices_configured = False`` (estimación de tokens únicamente).
+    """
+    config = load_config()
+    try:
+        cv_text = _load_cv_master()
+    except FileNotFoundError:
+        cv_text = ""
+
+    pending, avg_description_chars = pending_jobs_stats(_compute_cv_hash(cv_text))
+    cap = resolve_run_limit(limit, config.llm.max_jobs_per_run)
+    to_run = min(pending, cap)
+
+    input_tokens = int(to_run * (len(cv_text) + avg_description_chars)) // 4
+    output_tokens = to_run * OUTPUT_TOKENS_PER_JOB
+    cost = estimate_cost_usd(
+        input_tokens,
+        output_tokens,
+        config.llm.price_input_per_1k_usd,
+        config.llm.price_output_per_1k_usd,
+    )
+
+    return {
+        "pending": pending,
+        "limit": cap,
+        "to_run": to_run,
+        "estimated_input_tokens": input_tokens,
+        "estimated_output_tokens": output_tokens,
+        "estimated_cost_usd": round(cost, 4),
+        "prices_configured": bool(
+            config.llm.price_input_per_1k_usd or config.llm.price_output_per_1k_usd
+        ),
+    }
 
 
 def score_pending(

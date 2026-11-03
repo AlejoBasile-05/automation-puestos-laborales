@@ -531,3 +531,74 @@ def test_run_scoring_delegates_with_limit(
 
     assert captured["limit"] == 3
     assert result["limit"] == 3
+
+
+def test_get_filtered_jobs_min_score_excludes_unscored(
+    seeded: sessionmaker[Session],
+) -> None:
+    """Con puntaje mínimo solo quedan vacantes con score vigente >= umbral."""
+    base = _naive_now()
+    with seeded() as session:
+        job = session.query(Job).filter_by(external_id="gh-1").one()
+        session.add(
+            Score(
+                job_id=job.id,
+                cv_hash="h",
+                prompt_version="scoring_v1",
+                model="fake-model",
+                score=80,
+                verdict="aplicar",
+                matches_json=[],
+                gaps_json=[],
+                red_flags_json=[],
+                created_at=base,
+            )
+        )
+        session.commit()
+
+    jobs = dq.get_filtered_jobs(dq.JobFilters(min_score=70))
+
+    assert [job.external_id for job in jobs] == ["gh-1"]
+
+
+def test_get_filtered_jobs_sort_by_score_orders_descending(
+    seeded: sessionmaker[Session],
+) -> None:
+    """Ordenar por puntaje deja primero el más alto y al final los sin score."""
+    base = _naive_now()
+    with seeded() as session:
+        gh1 = session.query(Job).filter_by(external_id="gh-1").one()
+        lv2 = session.query(Job).filter_by(external_id="lv-2").one()
+        session.add_all(
+            [
+                Score(
+                    job_id=gh1.id,
+                    cv_hash="a",
+                    prompt_version="scoring_v1",
+                    model="m",
+                    score=80,
+                    verdict="aplicar",
+                    matches_json=[],
+                    gaps_json=[],
+                    red_flags_json=[],
+                    created_at=base,
+                ),
+                Score(
+                    job_id=lv2.id,
+                    cv_hash="b",
+                    prompt_version="scoring_v1",
+                    model="m",
+                    score=95,
+                    verdict="aplicar",
+                    matches_json=[],
+                    gaps_json=[],
+                    red_flags_json=[],
+                    created_at=base,
+                ),
+            ]
+        )
+        session.commit()
+
+    jobs = dq.get_filtered_jobs(dq.JobFilters(), sort="puntaje")
+
+    assert [job.external_id for job in jobs] == ["lv-2", "gh-1", "gh-3"]

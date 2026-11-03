@@ -19,6 +19,9 @@ class LLMConfig(BaseModel):
     model_scoring: str = "claude-3-haiku-20240307"
     model_writing: str = "claude-3-5-sonnet-20241022"
     max_jobs_per_run: int = 50
+    # Precio opcional por 1.000 tokens para estimar costo antes de ejecutar (0 = sin precio).
+    price_input_per_1k_usd: float = 0.0
+    price_output_per_1k_usd: float = 0.0
 
 
 class HTTPConfig(BaseModel):

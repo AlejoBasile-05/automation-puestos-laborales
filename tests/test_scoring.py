@@ -239,3 +239,16 @@ def test_resolve_run_limit_never_negative() -> None:
     """Valores negativos se normalizan a cero."""
     assert scoring.resolve_run_limit(-5, 50) == 0
     assert scoring.resolve_run_limit(None, -1) == 0
+
+
+def test_estimate_text_tokens() -> None:
+    """La estimación de tokens usa ~4 caracteres por token."""
+    assert scoring.estimate_text_tokens("") == 0
+    assert scoring.estimate_text_tokens("abcd") == 1
+    assert scoring.estimate_text_tokens("a" * 400) == 100
+
+
+def test_estimate_cost_usd() -> None:
+    """El costo suma entrada y salida según el precio por 1.000 tokens."""
+    assert scoring.estimate_cost_usd(1000, 1000, 2.0, 4.0) == 6.0
+    assert scoring.estimate_cost_usd(0, 0, 2.0, 4.0) == 0.0

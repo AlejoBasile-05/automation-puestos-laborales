@@ -28,7 +28,7 @@ from jobradar.db.models import (
 )
 from jobradar.db.session import get_engine, get_session_factory, init_db
 from jobradar.ingest import IngestSummary, ingest_companies
-from jobradar.scoring import score_pending
+from jobradar.scoring import estimate_scoring_run, score_pending
 
 LAST_VISIT_FILE = Path("data/last_visit.json")
 
@@ -65,6 +65,7 @@ class JobFilters(BaseModel):
     date_to: date | None = None
     status: str | None = None
     only_open: bool = False
+    min_score: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +76,15 @@ class JobFilters(BaseModel):
 def get_filtered_jobs(
     filters: JobFilters | None = None,
     last_visit: datetime | None = None,
+    sort: str = "recientes",
 ) -> list[Job]:
-    """Obtiene vacantes filtradas y marca las publicadas tras ``last_visit``."""
+    """Obtiene vacantes filtradas y marca las publicadas tras ``last_visit``.
+
+    Args:
+        filters: Filtros de la tabla; ``min_score`` exige un score vigente >= ese valor.
+        last_visit: Marca para calcular ``job.is_new``.
+        sort: ``"recientes"`` (por fecha, por defecto) o ``"puntaje"`` (mayor primero).
+    """
     active = filters or JobFilters()
     session_factory = _get_session_factory()
 
@@ -121,6 +129,23 @@ def get_filtered_jobs(
                 last_visit is not None
                 and job.posted_at is not None
                 and job.posted_at > last_visit
+            )
+
+    if active.min_score is not None or sort == "puntaje":
+        scores = get_scores_for_jobs([job.id for job in jobs])
+        if active.min_score is not None:
+            jobs = [
+                job
+                for job in jobs
+                if scores.get(job.id, {}).get("score", -1) >= active.min_score
+            ]
+        if sort == "puntaje":
+            jobs.sort(
+                key=lambda job: (
+                    scores.get(job.id, {}).get("score", -1),
+                    job.posted_at or datetime.min,
+                ),
+                reverse=True,
             )
 
     return jobs
@@ -181,6 +206,11 @@ def get_scores_for_jobs(job_ids: list[int]) -> dict[int, dict[str, Any]]:
 def run_scoring(limit: int | None = None) -> dict[str, Any]:
     """Puntúa vacantes pendientes respetando ``llm.max_jobs_per_run``."""
     return score_pending(limit=limit)
+
+
+def run_cost_estimate(limit: int | None = None) -> dict[str, Any]:
+    """Estima tokens y costo de la próxima corrida de scoring (sin llamar al LLM)."""
+    return estimate_scoring_run(limit=limit)
 
 
 def get_job_events(job_id: int) -> list[Event]:
