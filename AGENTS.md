@@ -67,6 +67,7 @@ jobradar/
 │   │   ├── base.py          # interfaz JobSource + dataclass NormalizedJob
 │   │   ├── greenhouse.py
 │   │   ├── lever.py
+│   │   ├── ashby.py
 │   │   └── workday.py       # fase extra
 │   ├── ingest.py            # orquesta fuentes, normaliza, deduplica, upsert
 │   ├── filters.py           # prefiltro por keywords, ubicación, antigüedad
@@ -105,7 +106,7 @@ Toda fuente implementa la interfaz `JobSource` y devuelve objetos `NormalizedJob
 ```python
 @dataclass
 class NormalizedJob:
-    source: str            # "greenhouse" | "lever" | "workday"
+    source: str            # "greenhouse" | "lever" | "ashby" | "workday"
     external_id: str
     company: str           # slug de la empresa
     company_name: str
@@ -128,6 +129,11 @@ class NormalizedJob:
 ### Lever
 - `GET https://api.lever.co/v0/postings/{company}?mode=json`
 - Campos esperados (verificar): `id`, `text` (título), `createdAt` (epoch en milisegundos), `categories.location`, `categories.team`, `categories.commitment`, `hostedUrl`, `descriptionPlain`, `lists`, `workplaceType`.
+
+### Ashby
+- Job board público: `GET https://api.ashbyhq.com/posting-api/job-board/{slug}`
+- Respuesta `{"jobs": [...], "apiVersion": ...}`. Campos verificados: `id` (UUID), `title`, `location`, `secondaryLocations`, `department`, `team`, `employmentType`, `publishedAt` (ISO 8601 con offset), `isListed`, `isRemote`, `workplaceType` ("Remote" | "Hybrid" | "Onsite"), `jobUrl`, `applyUrl`, `descriptionPlain`, `descriptionHtml`.
+- Filtrar `isListed == false` y preferir `descriptionPlain`.
 
 ### Workday (fase extra, inestable por naturaleza)
 - Cada empresa tiene su `tenant`, `wd{N}` y `site`. Listado: `POST https://{tenant}.wd{N}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs` con cuerpo `{"appliedFacets":{},"limit":20,"offset":0,"searchText":""}`.

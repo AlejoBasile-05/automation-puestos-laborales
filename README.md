@@ -6,7 +6,7 @@ Radar local de vacantes + CV a la medida para ATS.
 
 JobRadar es una aplicación **local** (corre en tu computadora, datos en tu disco) que:
 
-1. **Descubre vacantes** recientes publicadas en portales de reclutamiento de empresas (Greenhouse, Lever y, como extra, Workday) **antes** de que lleguen a LinkedIn.
+1. **Descubre vacantes** recientes publicadas en portales de reclutamiento de empresas (Greenhouse, Lever, Ashby y, como extra, Workday) **antes** de que lleguen a LinkedIn.
 2. Las **guarda en SQLite** y las muestra en un dashboard con filtros.
 3. **Puntúa la compatibilidad** de cada vacante contra tu CV maestro usando un LLM.
 4. Para las vacantes que te interesan, genera un **CV optimizado para ATS** (PDF/DOCX) y un **mensaje de postulación** específico para esa empresa.
@@ -34,6 +34,8 @@ uv run jobradar --help
 # Validar una empresa (probe)
 uv run jobradar probe greenhouse <slug>
 uv run jobradar probe lever <slug>
+uv run jobradar probe ashby <slug>
+uv run jobradar probe workday <tenant>   # ver nota de Workday más abajo
 
 # Ingesta de vacantes
 uv run jobradar ingest
@@ -236,6 +238,37 @@ uv run pytest && uv run ruff check . && uv run mypy src
 | `workplaceType` | string | "remote", "onsite", "hybrid" |
 
 **Importante para ingesta:** `createdAt` está en **epoch milliseconds** → convertir a datetime UTC. Preferir `descriptionPlain` / `descriptionBodyPlain` para texto limpio. `categories.location` puede ser "Netherlands remote" (string libre).
+
+---
+
+### Ashby (`api.ashbyhq.com/posting-api/job-board/{slug}`)
+
+**Respuesta:** `{ "jobs": [...], "apiVersion": "..." }` — 31 jobs para `linear`
+
+**Campos clave por job:**
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `id` | string (UUID) | ID único (ej: "d3bc1ced-3ce4-4086-a050-555055dbb1ff") |
+| `title` | string | Título del puesto |
+| `location` | string | Ubicación principal (ej: "Europe") |
+| `secondaryLocations` | array | Ubicaciones adicionales |
+| `department` | string | Departamento (ej: "Product") |
+| `team` | string | Equipo (ej: "Engineering") |
+| `employmentType` | string | "FullTime", "PartTime", "Contract" |
+| `publishedAt` | ISO 8601 | Fecha de publicación (ej: "2021-04-27T20:13:45.158+00:00") |
+| `isListed` | boolean | Si la vacante está publicada |
+| `isRemote` | boolean | Atajo de remoto |
+| `workplaceType` | string | "Remote", "Hybrid", "Onsite" |
+| `jobUrl` | string | URL pública de la vacante |
+| `applyUrl` | string | URL de aplicación |
+| `descriptionPlain` | string | **Descripción en texto plano** (recomendado para LLM) |
+| `descriptionHtml` | string | Descripción HTML |
+
+**Importante para ingesta:** usar `descriptionPlain`; filtrar `isListed == false`. `publishedAt` viene con offset. Ashby se volvió el ATS estándar de muchas startups, así que es la fuente con más volumen después de Greenhouse.
+
+### Workday
+
+El endpoint `cxs` es interno y sin garantías. En las pruebas del 2026-11-02, los tenants `mercadolibre`, `globant`, `despegar` y `pedidosya` devolvieron **HTTP 422** con el payload documentado en `AGENTS.md`, así que no se agregaron a `config.yaml`. Si un tenant empieza a responder, validalo con `probe` antes de sumarlo.
 
 ---
 

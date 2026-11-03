@@ -298,3 +298,24 @@ por puntaje y estimación de costo antes de puntuar.
 Evidencia: `uv run pytest -q` → `224 passed`; `ruff` limpio; `mypy src` limpio
 (35 archivos); AppTest 6/6 páginas OK; `estimate_scoring_run()` real →
 `{'pending': 1, 'limit': 10, 'to_run': 1, ...}`.
+
+L15 — Fuente Ashby + empresas verificadas (2026-11-02). El usuario pasó una
+lista de slugs por ATS. Se validaron con requests reales (1 req/s por host):
+la mayoría no vive en el ATS que suponía.
+
+| Fuente | Slugs válidos (vacantes) |
+|---|---|
+| Greenhouse | cloudflare (470), vercel (89) |
+| Lever | despegar (125), kavak (4), fintual (3), lemon (0) |
+| Ashby | notion (146), supabase (69), linear (31), resend (14), mural (13), posthog (10), belvo (3) |
+| Workday | mercadolibre/globant/despegar/pedidosya → HTTP 422; no se agregan |
+
+Sin ATS público detectado: tiendanube, pomelo, uala, coderhouse, satellogic,
+vintasoftware, getonboard, auth0, thoughtbot, devlane, platanus, buk, fintoc,
+kushki, cornershop, x-team, naranja-x, bairesdev, cal.
+
+Se implementó `AshbySource` (`src/jobradar/sources/ashby.py`) con fixture real
+`tests/fixtures/ashby_linear.json` (31 jobs) y 5 tests. `ingest` real:
+**977 vacantes nuevas** (13 empresas; 980 en total en la DB).
+
+Evidencia: `pytest -q` → 229 passed; `ruff` limpio; `mypy src` limpio (36 archivos).
