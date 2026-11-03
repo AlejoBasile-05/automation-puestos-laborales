@@ -319,3 +319,19 @@ Se implementó `AshbySource` (`src/jobradar/sources/ashby.py`) con fixture real
 **977 vacantes nuevas** (13 empresas; 980 en total en la DB).
 
 Evidencia: `pytest -q` → 229 passed; `ruff` limpio; `mypy src` limpio (36 archivos).
+
+L16 — Bug "Puntuar pendientes no hace nada" (2026-11-02). Causa raíz: el
+cliente Nvidia NIM tenía timeout fijo de 30 s y el modelo de escritura
+`deepseek-v4.1-flash` no responde ni en 150 s. El scoring hacía 10 llamadas
+secuenciales sin progreso visible y los errores solo iban a la consola.
+
+- `NvidiaClient` ahora usa `NVIDIA_TIMEOUT_SECONDS` (default 120).
+- `model_writing` pasa a `meta/llama-3.2-90b-vision-instruct` (el único rápido
+  y estable en esta cuenta: ~16 s; minimax/nemotron devuelven razonamiento y
+  `content` vacío con max_tokens bajos).
+- `score_pending(on_progress=...)` reporta avance por vacante y devuelve
+  `errors_detail`; el dashboard muestra barra de progreso y expander de errores.
+- Vacantes muestra pendientes/tope antes de ejecutar.
+
+Evidencia: `score --limit 1` real → `scored` sin timeout (Test Job y Cloudflare);
+`pytest -q` → 229 passed; ruff/mypy limpios.

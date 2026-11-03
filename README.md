@@ -138,6 +138,7 @@ uv run jobradar dashboard
 2. Copia `.env.example` a `.env` y agrega tus claves:
    - `ANTHROPIC_API_KEY` (si usas provider: anthropic)
    - `NVIDIA_API_KEY` (si usas provider: nvidia — con créditos gratuitos, key en https://build.nvidia.com/)
+   - `NVIDIA_TIMEOUT_SECONDS` (opcional, default `120`): los modelos gratuitos de NIM pueden tardar 20-60 s por respuesta. Si ves `read operation timed out`, subilo.
    - `BRAVE_SEARCH_API_KEY` (opcional, solo para `jobradar discover` con `provider: brave` — de pago: US$ 5 / 1.000 requests con US$ 5 de crédito mensual, key en https://api-dashboard.search.brave.com/register)
    - `SERPER_API_KEY` (opcional, solo para `jobradar discover` con `provider: serper` — 2.500 consultas gratis sin tarjeta, key en https://serper.dev/)
    - `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` (opcional, solo para `jobradar discover` con `provider: google_cse` — solo clientes existentes; el `CSE_ID` es el Search engine ID del Programmable Search Engine, no la API key)
